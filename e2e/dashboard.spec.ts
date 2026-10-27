@@ -1,0 +1,106 @@
+import { expect, test } from '@playwright/test'
+import type { Page } from '@playwright/test'
+
+async function intercept(page: Page, empty = false) {
+  await page.route('**/api/usage/daily?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    return route.fulfill({ json: empty ? [] : [{ provider: 'CODEX', date: params.get('to'), zone: params.get('zone'), inputTokens: 1200, outputTokens: 300, cachedTokens: null }] })
+  })
+}
+
+// Validates live-response rendering, unknown metrics, keyboard chart details, and query filters.
+test('shows observed usage and applies an explicit period and zone', async ({ page }) => {
+  await intercept(page)
+  await page.goto('/')
+  await expect(page.getByRole('status')).toHaveText('API connected')
+  await expect(page.getByRole('region', { name: 'Selected period totals' })).toContainText('1.5K')
+  await expect(page.getByRole('table')).toContainText('1,200')
+  await page.getByLabel('Start date').fill('2026-10-24')
+  await page.getByLabel('End date').fill('2026-10-26')
+  await page.getByLabel('Time zone').fill('UTC')
+  const request = page.waitForRequest(request => request.url().includes('from=2026-10-24&to=2026-10-26&zone=UTC'))
+  await page.getByRole('button', { name: 'Apply filters' }).click()
+  await request
+  await expect(page.getByRole('table')).toContainText('Oct 26')
+  await page.getByRole('button', { name: 'Cached input', exact: true }).click()
+  await expect(page.getByRole('button', { name: /Oct 26, Cached input: unavailable/ })).toBeVisible()
+})
+
+// Validates the difference between empty coverage and a real zero value.
+test('shows an empty period without invented zero totals', async ({ page }) => {
+  await intercept(page, true)
+  await page.goto('/')
+  await expect(page.getByText('No recorded usage in this period')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Selected period totals' })).toContainText('—')
+  await expect(page.getByRole('table')).toHaveCount(0)
+})
+
+// Validates that backend errors reveal no private detail and never masquerade as an empty successful collection.
+test('reports collection failures safely and allows recovery', async ({ page }) => {
+  await page.route('**/api/usage/daily?*', route => route.fulfill({ status: 503, json: { detail: 'PRIVATE_SESSION_DATA' } }))
+  await page.goto('/')
+  await expect(page.getByRole('alert')).toContainText('No partial totals')
+  await expect(page.locator('body')).not.toContainText('PRIVATE_SESSION_DATA')
+  await expect(page.getByText('No recorded usage in this period')).toHaveCount(0)
+  await intercept(page)
+  await page.getByRole('button', { name: 'Retry collection' }).click()
+  await expect(page.getByRole('status')).toHaveText('API connected')
+})
+
+// Validates that a failed background refresh clearly marks the last successful values as stale.
+test('retains previous values with a stale warning after refresh fails', async ({ page }) => {
+  await intercept(page)
+  await page.goto('/')
+  await expect(page.getByRole('table')).toContainText('1,200')
+  await page.route('**/api/usage/daily?*', route => route.fulfill({ status: 503 }))
+  await page.getByRole('button', { name: 'Refresh usage' }).click()
+  await expect(page.getByRole('alert')).toContainText('last successful result')
+  await expect(page.getByRole('table')).toContainText('1,200')
+  await expect(page.getByText('STALE DATA')).toBeVisible()
+})
+
+// Validates that automatic polling runs every five seconds and can be paused without blocking manual collection.
+test('polls automatically and respects the pause control', async ({ page }) => {
+  await page.clock.install()
+  let requests = 0
+  await page.route('**/api/usage/daily?*', route => { requests++; return route.fulfill({ json: [] }) })
+  await page.goto('/')
+  await expect(page.getByRole('status')).toHaveText('API connected')
+  const before = requests
+  await page.clock.runFor(5_100)
+  await expect.poll(() => requests).toBeGreaterThan(before)
+  await page.getByRole('checkbox', { name: /Auto-refresh/ }).uncheck()
+  const paused = requests
+  await page.clock.runFor(10_100)
+  expect(requests).toBe(paused)
+  await page.getByRole('button', { name: 'Refresh usage' }).click()
+  await expect.poll(() => requests).toBeGreaterThan(paused)
+})
+
+// Validates that the dashboard stays within the mobile viewport while tables and charts scroll inside their own panels.
+test('supports a narrow screen without horizontal page overflow', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await intercept(page)
+  await page.goto('/')
+  await expect(page.getByRole('status')).toHaveText('API connected')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: 'test-results/dashboard-mobile.png', fullPage: true })
+})
+
+// Validates rendering at a desktop size and captures a synthetic-data visual checkpoint.
+test('renders the desktop overview', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  await page.route('**/api/usage/daily?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    const end = new Date(params.get('to')! + 'T00:00:00Z')
+    return route.fulfill({ json: [4200, 6200, 2100, 8800, 6500, 4100, 5600].map((inputTokens, index) => {
+      const date = new Date(end)
+      date.setUTCDate(date.getUTCDate() - (6 - index))
+      return { provider: 'CODEX', zone: params.get('zone'), date: date.toISOString().slice(0, 10), inputTokens, outputTokens: 300 + index * 75, cachedTokens: index === 2 ? null : Math.floor(inputTokens / 2) }
+    }) })
+  })
+  await page.goto('/')
+  await expect(page.getByRole('table')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: 'test-results/dashboard-desktop.png', fullPage: true })
+})
