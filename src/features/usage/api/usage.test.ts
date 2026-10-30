@@ -1,5 +1,6 @@
+import { collection } from '../../../test/collection'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchDailyUsage, parseDailyUsage, UsageApiError } from './usage'
+import { fetchDailyUsage, parseDailyUsage, parseDailyCollection, UsageApiError } from './usage'
 
 const period = { from: '2026-10-24', to: '2026-10-26', zone: 'UTC' }
 const row = { provider: 'CODEX', date: '2026-10-25', zone: 'UTC', inputTokens: 100, outputTokens: 10, cachedTokens: null }
@@ -21,17 +22,17 @@ describe('usage API contract', () => {
   })
   // Validates filter encoding and cancellation propagation to the network request.
   it('sends the period and an abortable same-origin request', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([row])))
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(collection(period, [row]))))
     vi.stubGlobal('fetch', fetchMock)
-    await expect(fetchDailyUsage(period, new AbortController().signal)).resolves.toEqual([row])
+    await expect(fetchDailyUsage(period, new AbortController().signal)).resolves.toEqual(collection(period, [row]))
     const [url, options] = fetchMock.mock.calls[0]
-    expect(url).toBe('/api/usage/daily?from=2026-10-24&to=2026-10-26&zone=UTC')
+    expect(url).toBe('/api/usage/daily/collection?from=2026-10-24&to=2026-10-26&zone=UTC')
     expect(options.signal).toBeInstanceOf(AbortSignal)
   })
   // Validates that private backend error details are never forwarded to the UI.
   it('maps service unavailability to a safe message', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"detail":"PRIVATE_CONTENT"}', { status: 503 })))
-    await expect(fetchDailyUsage(period)).rejects.toMatchObject({ status: 503, message: 'Some session data could not be collected. No partial totals are available.' })
+    await expect(fetchDailyUsage(period)).rejects.toMatchObject({ status: 503, message: 'Session data could not be collected safely. No new result is available.' })
   })
   // Validates that an aborted request stays cancelled rather than becoming a connection error.
   it('preserves query cancellation', async () => {
@@ -41,4 +42,27 @@ describe('usage API contract', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(error))
     await expect(fetchDailyUsage(period, controller.signal)).rejects.toBe(error)
   })
+})
+
+// Validates partial and entirely pending envelopes preserve source coverage without inventing rows.
+it('preserves partial coverage and pending-only collections', () => {
+  expect(parseDailyCollection(collection(period, [row], 3), period)).toEqual(collection(period, [row], 3))
+  const empty = parseDailyCollection(collection(period, [], 3), period)
+  expect(empty.status).toBe('PARTIAL')
+  expect(empty.usage).toEqual([])
+})
+// Validates contradictory, imprecise, duplicate, missing, and mismatched coverage cannot masquerade as a trustworthy collection.
+it.each([
+  { ...collection(period, [row], 1), status: 'COMPLETE' },
+  { ...collection(period, [row]), status: 'PARTIAL' },
+  { ...collection(period, [row]), from: '2026-01-01' },
+  { ...collection(period, [row]), coverage: [] },
+  { ...collection(period, [row]), coverage: [{ provider: 'CODEX', observedSessions: 0, pendingSessions: 0 }] },
+  { ...collection(period), coverage: [{ provider: 'CODEX', observedSessions: 1, pendingSessions: -1 }] },
+  { ...collection(period), coverage: [{ provider: 'CODEX', observedSessions: 1.5, pendingSessions: 0 }] },
+  { ...collection(period), coverage: [{ provider: 'CODEX', observedSessions: Number.MAX_SAFE_INTEGER, pendingSessions: 1 }] },
+  { ...collection(period), coverage: [...collection(period).coverage, ...collection(period).coverage] },
+  { ...collection(period), usage: undefined },
+].map(payload => ({ payload })))('rejects invalid collection metadata: %j', ({ payload }) => {
+  expect(() => parseDailyCollection(payload, period)).toThrow(UsageApiError)
 })

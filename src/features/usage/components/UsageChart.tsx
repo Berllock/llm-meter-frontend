@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { BarChart3 } from 'lucide-react'
 import { displayDate } from '../model/dates'
-import { formatTokens, metricLabels, metrics } from '../model/usage'
+import { addTokens, formatTokens, metricLabels, metrics } from '../model/usage'
 import type { DailyPoint, Metric } from '../model/usage'
 
 export function UsageChart({ points, pending }: { points: readonly DailyPoint[]; pending: boolean }) {
@@ -10,7 +10,7 @@ export function UsageChart({ points, pending }: { points: readonly DailyPoint[];
   const step = Math.max(1, Math.ceil(points.length / 9))
   return <section className="panel activity-panel" id="activity" aria-labelledby="activity-title">
     <div className="panel-heading"><div><p className="eyebrow">CONSUMPTION OVER TIME</p><h2 id="activity-title">Daily activity</h2></div>
-      <div className="chart-tabs" aria-label="Chart metric">{metrics.map(item => <button key={item} aria-pressed={metric === item} className={metric === item ? 'active' : ''} onClick={() => setMetric(item)}>{metricLabels[item]}</button>)}</div>
+      <div className="chart-tabs" role="group" aria-label="Chart metric"><span className="chart-metric-label">Chart metric</span>{metrics.map(item => <button key={item} aria-pressed={metric === item} className={metric === item ? 'active' : ''} onClick={() => setMetric(item)}>{metricLabels[item]}</button>)}</div>
     </div>
     {pending ? <div className="chart-placeholder skeleton" aria-label="Loading daily chart" /> : !points.length ?
       <div className="chart-empty"><BarChart3 size={32} strokeWidth={1.3} /><strong>No observations in view</strong><p>Daily activity will appear after a successful collection with usage records.</p></div> :
@@ -30,6 +30,6 @@ export function UsageChart({ points, pending }: { points: readonly DailyPoint[];
           })}</div>
         </div></div>
       </div>}
-    <div className="chart-caption"><span><i className="legend-dot" />{metricLabels[metric]}</span><span>Recorded days only · Missing values stay unavailable</span></div>
+    <div className="chart-caption"><span aria-live="polite"><i className="legend-dot" />{metricLabels[metric]} · {pending ? 'Loading' : formatTokens(addTokens(points.map(point => point[metric])))} observed tokens</span><span>Recorded days only · Missing values stay unavailable</span></div>
   </section>
 }

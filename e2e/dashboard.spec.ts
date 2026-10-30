@@ -1,10 +1,14 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
+function envelope(params: URLSearchParams, usage: unknown[] = [], pendingSessions = 0) {
+  return { from: params.get('from'), to: params.get('to'), zone: params.get('zone'), usage,
+    status: pendingSessions ? 'PARTIAL' : 'COMPLETE', coverage: [{ provider: 'CODEX', observedSessions: usage.length ? 1 : 0, pendingSessions }] }
+}
 async function intercept(page: Page, empty = false) {
-  await page.route('**/api/usage/daily?*', route => {
+  await page.route('**/api/usage/daily/collection?*', route => {
     const params = new URL(route.request().url()).searchParams
-    return route.fulfill({ json: empty ? [] : [{ provider: 'CODEX', date: params.get('to'), zone: params.get('zone'), inputTokens: 1200, outputTokens: 300, cachedTokens: null }] })
+    return route.fulfill({ json: envelope(params, empty ? [] : [{ provider: 'CODEX', date: params.get('to'), zone: params.get('zone'), inputTokens: 1200, outputTokens: 300, cachedTokens: null }]) })
   })
 }
 
@@ -13,7 +17,7 @@ test('shows observed usage and applies an explicit period and zone', async ({ pa
   await intercept(page)
   await page.goto('/')
   await expect(page.getByRole('status')).toHaveText('API connected')
-  await expect(page.getByRole('region', { name: 'Selected period totals' })).toContainText('1.5K')
+  await expect(page.getByRole('region', { name: 'Selected period observations' })).toContainText('1.5K')
   await expect(page.getByRole('table')).toContainText('1,200')
   await page.getByLabel('Start date').fill('2026-10-24')
   await page.getByLabel('End date').fill('2026-10-26')
@@ -31,15 +35,15 @@ test('shows an empty period without invented zero totals', async ({ page }) => {
   await intercept(page, true)
   await page.goto('/')
   await expect(page.getByText('No recorded usage in this period')).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Selected period totals' })).toContainText('—')
+  await expect(page.getByRole('region', { name: 'Selected period observations' })).toContainText('—')
   await expect(page.getByRole('table')).toHaveCount(0)
 })
 
 // Validates that backend errors reveal no private detail and never masquerade as an empty successful collection.
 test('reports collection failures safely and allows recovery', async ({ page }) => {
-  await page.route('**/api/usage/daily?*', route => route.fulfill({ status: 503, json: { detail: 'PRIVATE_SESSION_DATA' } }))
+  await page.route('**/api/usage/daily/collection?*', route => route.fulfill({ status: 503, json: { detail: 'PRIVATE_SESSION_DATA' } }))
   await page.goto('/')
-  await expect(page.getByRole('alert')).toContainText('No partial totals')
+  await expect(page.getByRole('alert')).toContainText('No new result')
   await expect(page.locator('body')).not.toContainText('PRIVATE_SESSION_DATA')
   await expect(page.getByText('No recorded usage in this period')).toHaveCount(0)
   await intercept(page)
@@ -52,7 +56,7 @@ test('retains previous values with a stale warning after refresh fails', async (
   await intercept(page)
   await page.goto('/')
   await expect(page.getByRole('table')).toContainText('1,200')
-  await page.route('**/api/usage/daily?*', route => route.fulfill({ status: 503 }))
+  await page.route('**/api/usage/daily/collection?*', route => route.fulfill({ status: 503 }))
   await page.getByRole('button', { name: 'Refresh usage' }).click()
   await expect(page.getByRole('alert')).toContainText('last successful result')
   await expect(page.getByRole('table')).toContainText('1,200')
@@ -63,7 +67,7 @@ test('retains previous values with a stale warning after refresh fails', async (
 test('polls automatically and respects the pause control', async ({ page }) => {
   await page.clock.install()
   let requests = 0
-  await page.route('**/api/usage/daily?*', route => { requests++; return route.fulfill({ json: [] }) })
+  await page.route('**/api/usage/daily/collection?*', route => { requests++; return route.fulfill({ json: envelope(new URL(route.request().url()).searchParams) }) })
   await page.goto('/')
   await expect(page.getByRole('status')).toHaveText('API connected')
   const before = requests
@@ -90,17 +94,52 @@ test('supports a narrow screen without horizontal page overflow', async ({ page 
 // Validates rendering at a desktop size and captures a synthetic-data visual checkpoint.
 test('renders the desktop overview', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 })
-  await page.route('**/api/usage/daily?*', route => {
+  await page.route('**/api/usage/daily/collection?*', route => {
     const params = new URL(route.request().url()).searchParams
     const end = new Date(params.get('to')! + 'T00:00:00Z')
-    return route.fulfill({ json: [4200, 6200, 2100, 8800, 6500, 4100, 5600].map((inputTokens, index) => {
+    return route.fulfill({ json: envelope(params, [4200, 6200, 2100, 8800, 6500, 4100, 5600].map((inputTokens, index) => {
       const date = new Date(end)
       date.setUTCDate(date.getUTCDate() - (6 - index))
       return { provider: 'CODEX', zone: params.get('zone'), date: date.toISOString().slice(0, 10), inputTokens, outputTokens: 300 + index * 75, cachedTokens: index === 2 ? null : Math.floor(inputTokens / 2) }
-    }) })
+    })) })
   })
   await page.goto('/')
   await expect(page.getByRole('table')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: 'test-results/dashboard-desktop.png', fullPage: true })
+})
+
+// Validates partial observations stay visible, pending coverage is explicit, and polling replaces it once counters arrive.
+test('shows partial coverage and automatically includes newly observed counters', async ({ page }) => {
+  await page.clock.install()
+  let pending = 3
+  await page.route('**/api/usage/daily/collection?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    return route.fulfill({ json: envelope(params, [{ provider: 'CODEX', date: params.get('to'), zone: params.get('zone'), inputTokens: pending ? 100 : 150, outputTokens: 10, cachedTokens: null }], pending) })
+  })
+  await page.goto('/')
+  const coverage = page.getByRole('region', { name: 'Collection coverage' })
+  await expect(coverage).toContainText('3 sessions are pending token counts')
+  await expect(page.getByRole('status')).toHaveText('Collection incomplete')
+  await expect(page.getByRole('table')).toContainText('100')
+  await expect(coverage).not.toContainText('%')
+  pending = 0
+  await page.clock.runFor(5_100)
+  await expect(coverage).toContainText('No pending sessions')
+  await expect(page.getByRole('table')).toContainText('150')
+  await expect(page.getByRole('status')).toHaveText('API connected')
+})
+
+// Validates pending-only data never looks like a successful zero-usage period and retains its coverage label on failure.
+test('distinguishes pending-only data and stale coverage from empty observations', async ({ page }) => {
+  await page.route('**/api/usage/daily/collection?*', route => route.fulfill({ json: envelope(new URL(route.request().url()).searchParams, [], 2) }))
+  await page.goto('/')
+  await expect(page.getByText('No observations available for this period yet')).toBeVisible()
+  await expect(page.getByText('No recorded usage in this period', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Selected period observations' })).toContainText('—')
+  await page.route('**/api/usage/daily/collection?*', route => route.fulfill({ status: 503 }))
+  await page.getByRole('button', { name: 'Refresh usage' }).click()
+  await expect(page.getByRole('alert')).toContainText('last successful result')
+  await expect(page.getByRole('region', { name: 'Collection coverage' })).toContainText('current coverage is unknown')
+  await expect(page.getByText('STALE DATA', { exact: true })).toBeVisible()
 })

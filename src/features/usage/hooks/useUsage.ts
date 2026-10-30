@@ -2,12 +2,15 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchDailyUsage } from '../api/usage'
 import type { UsagePeriod } from '../model/usage'
 
-export function useUsage(period: UsagePeriod, autoRefresh: boolean) {
+type Runtime = { enabled: boolean; generation: string; refreshInBackground?: boolean }
+
+export function useUsage(period: UsagePeriod, autoRefresh: boolean, runtime: Runtime = { enabled: true, generation: 'browser' }) {
   return useQuery({
-    queryKey: ['usage', 'daily', period.from, period.to, period.zone],
+    enabled: runtime.enabled,
+    queryKey: ['usage', 'daily-collection', runtime.generation, period.from, period.to, period.zone],
     queryFn: ({ signal }) => fetchDailyUsage(period, signal),
     networkMode: 'always', retry: false, staleTime: 5_000, gcTime: 60_000,
     refetchInterval: autoRefresh ? 5_000 : false,
-    refetchIntervalInBackground: false, refetchOnWindowFocus: autoRefresh,
+    refetchIntervalInBackground: runtime.refreshInBackground ?? false, refetchOnWindowFocus: autoRefresh,
   })
 }

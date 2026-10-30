@@ -7,3 +7,12 @@
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation:none!important;transition:none!important}}
 /* Keep the native checkbox clickable above its visual switch. */
 .auto-refresh{position:relative}.auto-refresh input{inset:0 auto auto 0;margin:0;z-index:1;cursor:pointer}
+
+.desktop-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 14px 18px; margin-bottom: 20px; background: var(--surface, white); border: 1px solid #e4e7ec; border-radius: 12px; font-size: 13px; }
+.desktop-toolbar > div { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.chart-metric-label { align-self: center; font-size: 9px; color: #71807b; margin-right: 6px; }
+
+.coverage-banner { padding: 14px 18px; border: 1px solid #dfe8e1; background: #f4f8f5; border-radius: 9px; margin-bottom: 20px; color: #52695d; font-size: 12px; }
+.coverage-banner.incomplete { border-color: #ead7bc; background: #fffcf5; color: #856542; }
+.coverage-banner p { margin-top: 6px; font-size: 11px; line-height: 1.7; }

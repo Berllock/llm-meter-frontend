@@ -11,8 +11,14 @@
   `src/features`. Keep React presentation independent of desktop runtime APIs.
 - Unknown metrics are not zero. Do not fill absent days with invented observations,
   add cached input to input totals, fabricate costs/quotas, or expose backend errors.
+- The dashboard consumes `/api/usage/daily/collection`, with observed rows and
+  source-wide session coverage. Never label partial observations as complete totals
+  or turn session counts into token coverage percentages. Preserve hard failures,
+  stale coverage labeling, and query/source isolation. Legacy endpoints remain strict.
 - Add a brief English comment above new tests explaining what they validate.
   Run `npm run check` and relevant browser scenarios after behavioral changes.
-- The desktop direction is Electron plus the existing Java backend. This milestone
-  implements the browser dashboard; no Electron packaging or Java lifecycle exists yet.
+- The desktop shell is Electron with a sandboxed renderer and narrow preload IPC.
+  The main process owns Java startup, readiness, token-protected local requests,
+  restart, and shutdown. Java 21 is currently installed separately; runtime bundling
+  and installers remain future work. Preserve browser development mode.
 - Do not stage, commit, push, publish, or modify global settings automatically.

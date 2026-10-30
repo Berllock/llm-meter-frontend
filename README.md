@@ -2,11 +2,61 @@
 
 A local usage dashboard built with React, TypeScript, Vite, and TanStack Query.
 The backend remains the sibling Java/Spring Boot project `../llm-meter-personal`.
-This first milestone runs in a browser during development. The agreed product
-architecture is desktop with Electron; the Electron shell, packaged Java runtime,
-installer, and background process lifecycle are subsequent milestones.
+The Electron desktop shell starts and stops its own Java backend. The browser
+workflow remains available. Installers and a bundled Java runtime are future work.
 
-## Run locally
+## Run the desktop application
+
+Development prerequisites: Node.js 22.12+, npm, Java 21, and Maven available in the
+terminal. Linux has been validated; macOS remains unverified and the preparation
+script currently rejects Windows. Keep the frontend and backend sibling folders.
+
+```sh
+npm ci
+npm run desktop
+```
+
+This builds the executable backend JAR, React assets, and Electron sources, then
+opens the application. No separate Spring or Vite server is required. Close any
+existing desktop window before launching updated code: the single-instance guard
+otherwise focuses the already-running application. The first
+Electron launch can download its runtime. After preparing, `npm run desktop:start`
+reopens the existing build; rerun `npm run desktop` after source changes.
+
+The default source is `~/.codex/sessions`. Use **Choose sessions folder** to select
+another folder; only its absolute path is saved in Electron's user-data settings.
+**Restart service** recovers from startup or process failures. No usage history is
+persisted by this setting. Invalid source contents still yield a safe collection failure. Valid identified
+sessions without counters are reported as pending alongside proven observations.
+
+Java binds to loopback on an OS-selected free port, independent of an IDE backend
+on 8080. Readiness is published only after Spring is ready. Main-process requests
+carry a random per-launch token; port and token stay outside the renderer. Closing
+the application terminates only its owned Java process, escalating after five
+seconds if needed. Abrupt process kills/system crashes are not covered by graceful
+shutdown; there is no tray/background service in this milestone.
+
+The renderer is sandboxed and context-isolated, with no Node access. A narrow
+preload bridge supports usage reads, cancellation, state, restart, and native folder
+selection; IPC accepts only the application top-level frame. Production assets use
+relative paths and a local content security policy. Browser mode uses its existing
+same-origin HTTP transport.
+
+Optional development overrides:
+
+- `LLM_METER_JAVA`: Java executable path, for example an installed Java 21 binary.
+- `JAVA_HOME`: runtime installation used when no explicit executable is configured.
+- `LLM_METER_BACKEND_PROJECT`: backend project path for preparation.
+- `LLM_METER_SESSIONS_DIRECTORY`: initial source override (not automatically saved).
+- `LLM_METER_USER_DATA_DIR`: isolated settings directory for development/testing.
+
+Preparation resolves `java.home` from the backend directory and writes an ignored,
+machine-local runtime locator beside the JAR. This supports project-based version
+managers such as asdf when Java later starts from a temporary working directory.
+Moving/removing that runtime requires preparing again or setting the Java override.
+The JAR and locator under `resources/backend/` are generated artifacts, not installers.
+
+## Run in a browser
 
 Use Node.js 22.12+ (Node 24 LTS recommended) and npm.
 
@@ -35,8 +85,7 @@ another backend port, copy `.env.example` to `.env.local`, set
 `LLM_METER_API_TARGET`, and restart Vite. The value configures the local proxy;
 it is not a frontend secret. No backend CORS changes are required for this setup.
 `npm run preview` previews the production build at `http://127.0.0.1:4173`.
-The dev/preview proxies are not a production desktop integration: Electron will
-need its own local API transport and process management.
+The desktop bridge bypasses these Vite proxies; its backend has its own private port.
 
 ## First milestone
 
@@ -46,7 +95,8 @@ need its own local API transport and process management.
 - Period totals for input, output, cached input, and input plus output.
 - Daily chart with metric selection and keyboard-accessible value details.
 - Provider/day records with exact counts and an explicit unavailable state.
-- Five-second polling while the window is visible; pause and manual refresh.
+- Five-second polling, pause, and manual refresh. Desktop polling continues while
+  minimized or hidden; browser polling pauses in background.
 - Loading, empty, collection failure, and stale-data states. Previous data is
   clearly marked stale after a refresh error, never relabeled as a current result.
 - Responsive layout, native form controls, reduced-motion support, and no external
@@ -54,7 +104,10 @@ need its own local API transport and process management.
 
 ## Data contract and limits
 
-The UI consumes `GET /api/usage/daily?from=YYYY-MM-DD&to=YYYY-MM-DD&zone=...`.
+The UI consumes `GET /api/usage/daily/collection?from=YYYY-MM-DD&to=YYYY-MM-DD&zone=...`.
+The response echoes the period and includes `usage`, `coverage` per provider, and
+`status` (`COMPLETE` or `PARTIAL`). Legacy array and cumulative endpoints remain
+strict and are not used by the dashboard.
 It validates responses before display. Missing or null metrics never become zero;
 empty coverage does not prove zero account-wide usage. Cached input is already a
 subset of input and is not added to observed total tokens. Multiple providers are
@@ -67,7 +120,10 @@ model attribution, nor cost estimates are fabricated. Usage timing reflects loca
 recorded observations, subject to the backend's coverage and attribution rules.
 
 Each request currently rereads the configured backend source. Polling is deliberately
-limited to five seconds, has no overlapping retry loop, and pauses in background.
+limited to five seconds and has no overlapping retry loop. Browser polling pauses
+in background; desktop polling continues while minimized or hidden and can be
+paused with Auto-refresh. This keeps collecting from files while you use another
+application, at the cost of continued source reads while the desktop is open.
 Local requests use `networkMode: 'always'` so they can work without an internet
 connection. Changing filters cancels obsolete requests; each request has a 15-second
 timeout. Future file watching, incremental collection, and server push should be
@@ -76,7 +132,11 @@ based on measured collection cost and correct handling of writes in progress.
 ## Layout
 
 ```text
+desktop/                       Electron main, preload, settings, Java lifecycle
+shared/                        Renderer/main bridge types
+scripts/                       Backend preparation and real desktop verification
 src/
+  desktop/                     Optional bridge adapter and readiness state
   app/                         Application composition and query provider
   features/usage/
     api/                       HTTP transport and runtime contract validation
@@ -88,16 +148,18 @@ src/
 e2e/                           Browser scenarios with synthetic API responses
 ```
 
-The React UI does not read local files or depend on Electron/Node APIs. This keeps
-its domain and presentation reusable when the desktop shell is added. CSS and the
+The React UI never reads local files or imports Electron/Node APIs. Its optional
+transport bridge preserves reusable domain and presentation code. CSS and the
 chart are native browser code; icons come from Lucide.
 
 ## Validation
 
 ```sh
-npm run check          # Lint, unit/component tests, type checking, production build
+npm run check          # Lint, unit/component/lifecycle tests, UI and desktop builds
 npx playwright install chromium
 npm run test:e2e       # Real-browser interactions with explicitly synthetic data
+npm run desktop:prepare
+npm run test:desktop   # Real Electron + Java, synthetic sessions, desktop display required
 ```
 
 Each test has a short English comment describing its intent. Browser tests cover
@@ -105,20 +167,29 @@ filters, unknown/empty data, failure recovery, stale results, polling/pause,
 responsive layout, and visual checkpoints. Screenshots and browser traces are
 ignored under `test-results/`; no real session data belongs in fixtures.
 
-## Next desktop milestones
+## Next milestones
 
-1. Validate the dashboard against the local backend and real usage patterns.
-2. Add the Electron shell, isolated renderer/preload boundary, and a narrow API
-   bridge. Reuse the current components and data rules.
-3. Manage the Java service lifecycle, readiness, local endpoint configuration,
-   and shutdown; bundle a suitable Java runtime per target OS.
-4. Add desktop packaging and measure startup time, memory, and collection cost.
-5. Investigate file-change-driven updates, then model/cost/quota capabilities only
-   when the provider data supports them.
+1. Bundle a Java runtime and build installers for selected operating systems.
+2. Measure startup time, memory, and collection cost with representative sources.
+3. Investigate file watching, incremental collection, and push updates.
+4. Add model/cost/quota capabilities only when validated provider data supports them.
 
-These are planned milestones, not implemented features. Technology choices serve
-the product and learning goals (including broad engineering skills for future
-roles); no framework choice is a hiring guarantee.
+There is no database or new historical store. Calendar coverage still depends on
+available session observations. Collection validates the entire source before date
+filtering. Valid identified sessions without counters stay pending; malformed data,
+unsafe attribution, conflicting copies, and other hard failures still return 503.
+Coverage counts unique source sessions, not files, token percentages, or sessions
+within the selected date range. Pending usage cannot yet be attributed to a date.
+`COMPLETE` means no pending sessions in this source snapshot, not complete billing
+or account-wide usage; unknown metrics remain unavailable.
+
+The UI labels values as observations and warns about partial coverage, including
+pending-only periods without invented zeros. Each collection rechecks pending files.
+Hard failures retain the last successful collection and its coverage in memory,
+explicitly marked stale/current coverage unknown. This cache is scoped to the same
+period and source generation and does not survive an application restart. Token
+metric controls apply to the chart and its observed-token summary; cards/table
+retain all metrics. Full backend contract: `../llm-meter-personal/docs/usage-coverage.md`.
 
 ## Project memory
 

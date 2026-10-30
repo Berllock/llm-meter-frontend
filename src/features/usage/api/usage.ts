@@ -1,6 +1,7 @@
+import { readDesktopUsage } from '../../../desktop/request'
 import { isDate } from '../model/dates'
 import { metrics } from '../model/usage'
-import type { DailyUsage, UsagePeriod } from '../model/usage'
+import type { DailyUsage, DailyUsageCollection, ProviderCoverage, UsagePeriod } from '../model/usage'
 
 export class UsageApiError extends Error {
   readonly status: number | null
@@ -28,19 +29,49 @@ export function parseDailyUsage(payload: unknown, period: UsagePeriod): DailyUsa
   })
 }
 
-export async function fetchDailyUsage(period: UsagePeriod, signal?: AbortSignal): Promise<DailyUsage[]> {
+export function parseDailyCollection(payload: unknown, period: UsagePeriod): DailyUsageCollection {
+  const invalid = () => new UsageApiError('The collected data could not be displayed reliably. Try collecting it again.')
+  if (!payload || typeof payload !== 'object') throw invalid()
+  const value = payload as Record<string, unknown>
+  if (value.from !== period.from || value.to !== period.to || value.zone !== period.zone
+    || !['COMPLETE', 'PARTIAL'].includes(value.status as string) || !Array.isArray(value.coverage)) throw invalid()
+  const providers = new Map<string, ProviderCoverage>()
+  let sessions = 0
+  const coverage = value.coverage.map((entry: unknown) => {
+    if (!entry || typeof entry !== 'object') throw invalid()
+    const item = entry as Record<string, unknown>
+    if (typeof item.provider !== 'string' || !item.provider.trim() || providers.has(item.provider)) throw invalid()
+    for (const key of ['observedSessions', 'pendingSessions']) {
+      if (typeof item[key] !== 'number' || !Number.isSafeInteger(item[key]) || item[key] < 0) throw invalid()
+      sessions += item[key]
+      if (!Number.isSafeInteger(sessions)) throw invalid()
+    }
+    const row = { provider: item.provider, observedSessions: item.observedSessions as number, pendingSessions: item.pendingSessions as number }
+    providers.set(row.provider, row)
+    return row
+  })
+  if ((value.status === 'PARTIAL') !== coverage.some(item => item.pendingSessions > 0)) throw invalid()
+  const usage = parseDailyUsage(value.usage, period)
+  if (usage.some(row => !providers.has(row.provider) || providers.get(row.provider)!.observedSessions === 0)) throw invalid()
+  return { ...period, status: value.status as DailyUsageCollection['status'], usage, coverage }
+}
+
+export async function fetchDailyUsage(period: UsagePeriod, signal?: AbortSignal): Promise<DailyUsageCollection> {
   const params = new URLSearchParams(period)
   try {
     const timeout = AbortSignal.timeout(15_000)
-    const response = await fetch(`/api/usage/daily?${params}`, {
+    const response = window.llmMeter ? await readDesktopUsage(window.llmMeter, period, signal) : await fetch(`/api/usage/daily/collection?${params}`, {
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout, headers: { Accept: 'application/json' },
     })
-    if (!response.ok) {
-      if (response.status === 503) throw new UsageApiError('Some session data could not be collected. No partial totals are available.', 503)
-      if (response.status === 400) throw new UsageApiError('The selected period or time zone was not accepted. Check the filters and try again.', 400)
-      throw new UsageApiError('The local service could not complete this collection. Please try again.', response.status)
+    const status = response.status
+    const ok = 'ok' in response ? response.ok : status >= 200 && status < 300
+    if (!ok) {
+      if (status === 503) throw new UsageApiError('Session data could not be collected safely. No new result is available.', 503)
+      if (status === 400) throw new UsageApiError('The selected period or time zone was not accepted. Check the filters and try again.', 400)
+      if (status === 0) throw new UsageApiError('Cannot reach the local service. Restart the service and retry.')
+      throw new UsageApiError('The local service could not complete this collection. Please try again.', status)
     }
-    return parseDailyUsage(await response.json(), period)
+    return parseDailyCollection('json' in response ? await response.json() : response.body, period)
   } catch (error) {
     if (signal?.aborted) throw error
     if (error instanceof UsageApiError) throw error

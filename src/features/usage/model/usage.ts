@@ -30,3 +30,10 @@ export function formatTokens(value: number | null, compact = false): string {
   if (value === null) return '—'
   return new Intl.NumberFormat('en-US', compact ? { notation: 'compact', maximumFractionDigits: 1 } : {}).format(value)
 }
+
+export type ProviderCoverage = Readonly<{ provider: string; observedSessions: number; pendingSessions: number }>
+export type DailyUsageCollection = UsagePeriod & Readonly<{
+  status: 'COMPLETE' | 'PARTIAL'
+  usage: DailyUsage[]
+  coverage: ProviderCoverage[]
+}>
