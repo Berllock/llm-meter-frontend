@@ -143,3 +143,38 @@ test('distinguishes pending-only data and stale coverage from empty observations
   await expect(page.getByRole('region', { name: 'Collection coverage' })).toContainText('current coverage is unknown')
   await expect(page.getByText('STALE DATA', { exact: true })).toBeVisible()
 })
+
+// Validates all-agent totals, agent-scoped cards/chart/table/coverage, and isolation after one agent fails.
+test('aggregates configured agents and filters without leaking another agent result', async ({ page }) => {
+  let failAntigravity = false
+  await page.route('**/api/usage/daily/collection?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    const provider = params.get('provider')
+    if (provider === 'ANTIGRAVITY' && failAntigravity) return route.fulfill({ status: 503 })
+    const all = [
+      { provider: 'CODEX', date: params.get('to'), zone: params.get('zone'), inputTokens: 100, outputTokens: 10, cachedTokens: 50 },
+      { provider: 'ANTIGRAVITY', date: params.get('to'), zone: params.get('zone'), inputTokens: 200, outputTokens: 20, cachedTokens: 150 },
+    ]
+    const usage = provider ? all.filter(row => row.provider === provider) : all
+    return route.fulfill({ json: { from: params.get('from'), to: params.get('to'), zone: params.get('zone'), status: 'COMPLETE', usage,
+      coverage: usage.map(row => ({ provider: row.provider, observedSessions: 1, pendingSessions: 0 })) } })
+  })
+  await page.goto('/')
+  const summary = page.getByRole('region', { name: 'Selected period observations' })
+  const coverage = page.getByRole('region', { name: 'Collection coverage' })
+  await expect(summary).toContainText('330')
+  await expect(coverage).toContainText('2 sessions')
+  await page.getByLabel('Agent', { exact: true }).selectOption('ANTIGRAVITY')
+  await expect(summary).toContainText('220')
+  await expect(page.getByRole('table')).not.toContainText('CODEX')
+  await expect(coverage).toContainText('1 session')
+  failAntigravity = true
+  await page.getByRole('button', { name: 'Refresh usage' }).click()
+  await expect(page.getByText('STALE DATA')).toBeVisible()
+  await page.getByLabel('Agent', { exact: true }).selectOption('CODEX')
+  await expect(summary).toContainText('110')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(page.getByRole('table')).not.toContainText('ANTIGRAVITY')
+  await page.getByLabel('Agent', { exact: true }).selectOption('')
+  await expect(summary).toContainText('330')
+})

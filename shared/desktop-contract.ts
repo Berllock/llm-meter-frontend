@@ -4,7 +4,9 @@ export type BackendState = {
   revision: number
   generation: string
 }
-export type DesktopPeriod = { from: string; to: string; zone: string }
+export type DesktopAgent = 'CODEX' | 'ANTIGRAVITY'
+export type AgentSources = Partial<Record<DesktopAgent, string>>
+export type DesktopPeriod = { from: string; to: string; zone: string; provider?: DesktopAgent }
 export type DesktopResponse = { status: number; body: unknown }
 export type DesktopBridge = {
   getBackendState(): Promise<BackendState>
@@ -12,5 +14,5 @@ export type DesktopBridge = {
   readDailyUsage(period: DesktopPeriod, requestId: string): Promise<DesktopResponse>
   cancelUsage(requestId: string): void
   restartBackend(): Promise<void>
-  chooseSessionsFolder(): Promise<void>
+  chooseSessionsFolder(provider?: DesktopAgent): Promise<void>
 }

@@ -24,8 +24,10 @@ otherwise focuses the already-running application. The first
 Electron launch can download its runtime. After preparing, `npm run desktop:start`
 reopens the existing build; rerun `npm run desktop` after source changes.
 
-The default source is `~/.codex/sessions`. Use **Choose sessions folder** to select
-another folder; only its absolute path is saved in Electron's user-data settings.
+Desktop startup discovers existing default sources at `~/.codex/sessions` and
+`~/.gemini/antigravity/brain`. Use **Choose sessions folder** for Codex and
+**Choose Antigravity brain folder** for Antigravity; each source is saved separately
+in Electron's user-data settings. Existing Codex-only settings remain readable.
 **Restart service** recovers from startup or process failures. No usage history is
 persisted by this setting. Invalid source contents still yield a safe collection failure. Valid identified
 sessions without counters are reported as pending alongside proven observations.
@@ -48,7 +50,8 @@ Optional development overrides:
 - `LLM_METER_JAVA`: Java executable path, for example an installed Java 21 binary.
 - `JAVA_HOME`: runtime installation used when no explicit executable is configured.
 - `LLM_METER_BACKEND_PROJECT`: backend project path for preparation.
-- `LLM_METER_SESSIONS_DIRECTORY`: initial source override (not automatically saved).
+- `LLM_METER_SESSIONS_DIRECTORY`: initial Codex source override (not automatically saved).
+- `LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY`: initial Antigravity brain source override.
 - `LLM_METER_USER_DATA_DIR`: isolated settings directory, also supported by packaged builds.
   Java and source overrides above apply only to development; packaged builds use
   the included runtime and the normal saved source selection.
@@ -92,6 +95,8 @@ The desktop bridge bypasses these Vite proxies; its backend has its own private 
 
 ## First milestone
 
+- Agent selection: all configured agents, Codex, or Antigravity. Cards, chart,
+  table, and coverage use the same query scope; caches stay isolated by agent.
 - Inclusive period and time-zone filters; Today, 7-day, and 30-day presets.
 - Presets follow the selected local day across midnight, checked every minute
   and when the window regains focus. Custom date ranges remain fixed.
@@ -108,6 +113,10 @@ The desktop bridge bypasses these Vite proxies; its backend has its own private 
 ## Data contract and limits
 
 The UI consumes `GET /api/usage/daily/collection?from=YYYY-MM-DD&to=YYYY-MM-DD&zone=...`.
+Optional `provider=CODEX` or `provider=ANTIGRAVITY` selects an agent before backend
+collection. Without it, normalized observations from all configured agents are
+combined in the dashboard. Antigravity input is normalized to include cached reads;
+see the backend [integration contract](../llm-meter-personal/docs/antigravity-integration.md).
 The response echoes the period and includes `usage`, `coverage` per provider, and
 `status` (`COMPLETE` or `PARTIAL`). Legacy array and cumulative endpoints remain
 strict and are not used by the dashboard.
@@ -178,11 +187,13 @@ ignored under `test-results/`; no real session data belongs in fixtures.
 
 ## Next milestones
 
-1. Validate portable Linux releases on additional distributions; add native packages,
-   signing, and other operating systems as separate distribution work.
-2. Measure startup time, memory, and collection cost with representative sources.
-3. Investigate file watching, incremental collection, and push updates.
-4. Add model/cost/quota capabilities only when validated provider data supports them.
+1. Validate provider formats and strengthen multi-agent source workflows.
+2. Define reliable project/session attribution across agents before adding project
+   filters; do not infer ownership from a folder basename alone.
+3. Define durable history and model/cost/quota capabilities only where supported
+   by validated source data.
+4. Improve the dashboard around these workflows. Distribution polish is deferred
+   until core integrations and product features are ready.
 
 There is no database or new historical store. Calendar coverage still depends on
 available session observations. Collection validates the entire source before date

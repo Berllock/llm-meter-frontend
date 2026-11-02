@@ -66,3 +66,14 @@ it.each([
 ].map(payload => ({ payload })))('rejects invalid collection metadata: %j', ({ payload }) => {
   expect(() => parseDailyCollection(payload, period)).toThrow(UsageApiError)
 })
+
+// Validates a selected agent reaches the backend and a response from another agent is refused.
+it('encodes and validates agent selection', async () => {
+  const query = { ...period, provider: 'CODEX' as const }
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(collection(period, [row]))))
+  vi.stubGlobal('fetch', fetchMock)
+  await fetchDailyUsage(query)
+  expect(fetchMock.mock.calls[0][0]).toContain('&provider=CODEX')
+  const foreign = { ...collection(period, [{ ...row, provider: 'ANTIGRAVITY' }]), coverage: [{ provider: 'ANTIGRAVITY', observedSessions: 1, pendingSessions: 0 }] }
+  expect(() => parseDailyCollection(foreign, query)).toThrow(UsageApiError)
+})

@@ -1,11 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { BackendManager } from './backend.js'
 import { resolveBackendRuntime } from './runtime.js'
-import { readSource, saveSource } from './settings.js'
+import type { AgentSources, DesktopAgent } from '../shared/desktop-contract.js'
+import { readSources, saveSource } from './settings.js'
 
 app.setName('LLM Meter Personal')
 if (process.env.LLM_METER_USER_DATA_DIR) {
@@ -14,7 +15,7 @@ if (process.env.LLM_METER_USER_DATA_DIR) {
 }
 let window: BrowserWindow | null = null
 let backend: BackendManager
-let source = ''
+let sources: AgentSources = {}
 let quitting = false
 let operation = Promise.resolve()
 const requests = new Map<string, AbortController>()
@@ -30,19 +31,23 @@ function serialize(action: () => Promise<void>) {
   })
   return operation
 }
-async function restart() { await backend.stop(); if (!quitting) await backend.start(source) }
-async function chooseSource() {
+async function restart() { await backend.stop(); if (!quitting) await backend.start(sources) }
+async function chooseSource(provider: DesktopAgent = 'CODEX') {
   if (!window) return
-  const result = await dialog.showOpenDialog(window, { title: 'Choose Codex sessions folder', properties: ['openDirectory'] })
+  const result = await dialog.showOpenDialog(window, { title: provider === 'CODEX' ? 'Choose Codex sessions folder' : 'Choose Antigravity brain folder', properties: ['openDirectory'] })
   if (result.canceled || !result.filePaths[0] || quitting) return
-  await saveSource(app.getPath('userData'), result.filePaths[0])
-  source = result.filePaths[0]
+  await saveSource(app.getPath('userData'), result.filePaths[0], provider)
+  sources = { ...sources, [provider]: result.filePaths[0] }
   await restart()
 }
 function registerBridge() {
   ipcMain.handle('meter:state', event => { requireTrusted(event); return backend.state })
   ipcMain.handle('meter:restart', event => { requireTrusted(event); return serialize(restart) })
-  ipcMain.handle('meter:choose-source', event => { requireTrusted(event); return serialize(chooseSource) })
+  ipcMain.handle('meter:choose-source', (event, provider: unknown = 'CODEX') => {
+    requireTrusted(event)
+    if (provider !== 'CODEX' && provider !== 'ANTIGRAVITY') throw new Error('Invalid agent')
+    return serialize(() => chooseSource(provider))
+  })
   ipcMain.handle('meter:daily', async (event, period: unknown, id: unknown) => {
     requireTrusted(event)
     if (typeof id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(id) || requests.has(id) || requests.size >= 8) return { status: 0, body: null }
@@ -74,14 +79,21 @@ else {
     registerBridge()
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { label: 'File', submenu: [
-        { label: 'Choose sessions folder…', click: () => { void serialize(chooseSource) } },
+        { label: 'Choose sessions folder…', click: () => { void serialize(() => chooseSource()) } },
+        { label: 'Choose Antigravity brain folder…', click: () => { void serialize(() => chooseSource('ANTIGRAVITY')) } },
         { label: 'Restart local service', click: () => { void serialize(restart) } }, { type: 'separator' }, { role: 'quit' },
       ] },
       { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
     ]))
     createWindow()
-    source = (!app.isPackaged && process.env.LLM_METER_SESSIONS_DIRECTORY) || await readSource(app.getPath('userData')) || join(homedir(), '.codex', 'sessions')
-    if (!quitting) await serialize(() => backend.start(source))
+    sources = await readSources(app.getPath('userData'))
+    const defaults: AgentSources = { CODEX: join(homedir(), '.codex', 'sessions'), ANTIGRAVITY: join(homedir(), '.gemini', 'antigravity', 'brain') }
+    for (const provider of ['CODEX', 'ANTIGRAVITY'] as const) {
+      const override = !app.isPackaged && process.env[provider === 'CODEX' ? 'LLM_METER_SESSIONS_DIRECTORY' : 'LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY']
+      if (override) sources[provider] = override
+      else if (!sources[provider] && defaults[provider] && existsSync(defaults[provider])) sources[provider] = defaults[provider]
+    }
+    if (!quitting) await serialize(() => backend.start(sources))
   }).catch(() => { dialog.showErrorBox('LLM Meter', 'The desktop application could not be initialized.'); app.quit() })
   app.on('window-all-closed', () => app.quit())
   app.on('before-quit', event => {

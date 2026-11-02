@@ -3,6 +3,9 @@ export type Metric = (typeof metrics)[number]
 export type TokenCounts = Readonly<Record<Metric, number | null>>
 export type DailyUsage = TokenCounts & Readonly<{ provider: string; date: string; zone: string }>
 export type UsagePeriod = Readonly<{ from: string; to: string; zone: string }>
+export const agents = ['CODEX', 'ANTIGRAVITY'] as const
+export type Agent = (typeof agents)[number]
+export type UsageQuery = UsagePeriod & Readonly<{ provider?: Agent }>
 export type DailyPoint = TokenCounts & Readonly<{ date: string }>
 
 export const metricLabels: Record<Metric, string> = {

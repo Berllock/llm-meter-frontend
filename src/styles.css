@@ -16,3 +16,6 @@
 .coverage-banner { padding: 14px 18px; border: 1px solid #dfe8e1; background: #f4f8f5; border-radius: 9px; margin-bottom: 20px; color: #52695d; font-size: 12px; }
 .coverage-banner.incomplete { border-color: #ead7bc; background: #fffcf5; color: #856542; }
 .coverage-banner p { margin-top: 6px; font-size: 11px; line-height: 1.7; }
+
+.agent-filter { margin-bottom: 14px; max-width: 280px; }
+.agent-filter select { min-height: 40px; padding: 8px 12px; border: 1px solid #dce2e9; border-radius: 8px; background: white; color: inherit; font: inherit; width: 100%; }

@@ -11,10 +11,12 @@ await mkdir(sessions)
 await copyFile(join(project, 'e2e/fixtures/desktop-session.jsonl'), join(sessions, 'sample.jsonl'))
 const packaged = process.argv.includes('--packaged')
 const executablePath = process.env.LLM_METER_PACKAGED_EXECUTABLE || join(project, 'release/linux-unpacked/llm-meter-personal')
+const brain = join(root, 'brain')
+await mkdir(brain)
 const settings = join(root, 'settings')
 await mkdir(settings)
-await writeFile(join(settings, 'settings.json'), JSON.stringify({ sessionsDirectory: sessions }))
-const environment = { ...process.env, LLM_METER_USER_DATA_DIR: settings, LLM_METER_SESSIONS_DIRECTORY: sessions, LLM_METER_DESKTOP_HIDE_WINDOW: '1' }
+await writeFile(join(settings, 'settings.json'), JSON.stringify({ sources: { CODEX: sessions, ANTIGRAVITY: brain } }))
+const environment = { ...process.env, LLM_METER_USER_DATA_DIR: settings, LLM_METER_SESSIONS_DIRECTORY: sessions, LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY: brain, LLM_METER_DESKTOP_HIDE_WINDOW: '1' }
 if (packaged) Object.assign(environment, { PATH: '/nonexistent-build-tools', JAVA_HOME: '/nonexistent-jdk', LLM_METER_JAVA: '/nonexistent-java', JAVA_TOOL_OPTIONS: '--invalid-host-java-option', _JAVA_OPTIONS: '--invalid-host-java-option', JDK_JAVA_OPTIONS: '--invalid-host-java-option' })
 const launch = () => electron.launch({ ...(packaged ? { executablePath, args: [] } : { args: [project] }), env: environment, timeout: 30_000 })
 let application
@@ -46,7 +48,8 @@ try {
   }
   const result = await page.evaluate(() => window.llmMeter.readDailyUsage({ from: '2026-10-20', to: '2026-10-30', zone: 'UTC' }, crypto.randomUUID()))
   assert.equal(result.status, 200)
-  assert.deepEqual(result.body, { from: '2026-10-20', to: '2026-10-30', zone: 'UTC', status: 'COMPLETE', coverage: [{ provider: 'CODEX', observedSessions: 1, pendingSessions: 0 }], usage: [{ provider: 'CODEX', date: '2026-10-25', zone: 'UTC', inputTokens: 160, outputTokens: 16, cachedTokens: 80 }] })
+  result.body.coverage.sort((a, b) => a.provider.localeCompare(b.provider))
+  assert.deepEqual(result.body, { from: '2026-10-20', to: '2026-10-30', zone: 'UTC', status: 'COMPLETE', coverage: [{ provider: 'ANTIGRAVITY', observedSessions: 0, pendingSessions: 0 }, { provider: 'CODEX', observedSessions: 1, pendingSessions: 0 }], usage: [{ provider: 'CODEX', date: '2026-10-25', zone: 'UTC', inputTokens: 160, outputTokens: 16, cachedTokens: 80 }] })
   await page.getByLabel('Start date').fill('2026-10-20')
   await page.getByLabel('End date').fill('2026-10-30')
   await page.getByLabel('Time zone').fill('UTC')
@@ -82,6 +85,8 @@ try {
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].show())
   await page.getByLabel('Start date').fill('2026-10-27')
   await page.getByLabel('End date').fill('2026-10-27')
+  await expect(page.getByLabel('Start date')).toHaveValue('2026-10-27')
+  await expect(page.getByLabel('End date')).toHaveValue('2026-10-27')
   await page.getByRole('button', { name: 'Apply filters' }).click()
   await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(1)
   await expect(page.getByText('Input tokens · 40 observed tokens')).toBeVisible()
@@ -90,6 +95,40 @@ try {
   await expect(page.getByRole('table')).toBeVisible()
   const restarted = await ownedJavaProcesses()
   if (process.platform === 'linux') { assert.equal(restarted.length, 1); assert.notEqual(restarted[0], originalChildren[0]) }
+  // Validates a second agent enters polling once, uses cache-inclusive input, and remains independently filterable through IPC.
+  const antigravityLogs = join(brain, 'synthetic-conversation', '.system_generated', 'logs')
+  await mkdir(antigravityLogs, { recursive: true })
+  const antigravityTranscript = join(antigravityLogs, 'transcript_full.jsonl')
+  const antigravityRows = [
+    { step_index: 0, type: 'USER_INPUT', source: 'USER_EXPLICIT', status: 'DONE', created_at: '2026-10-27T12:00:00Z' },
+    { step_index: 1, type: 'PLANNER_RESPONSE', source: 'MODEL', status: 'DONE', created_at: '2026-10-27T12:01:00Z', input_tokens: 20, cache_read_tokens: 80, output_tokens: 10 },
+  ].map(value => JSON.stringify(value)).join('\n') + '\n'
+  await writeFile(antigravityTranscript, antigravityRows)
+  await writeFile(join(antigravityLogs, 'transcript.jsonl'), antigravityRows)
+  await expect(page.getByText('Input tokens · 140 observed tokens')).toBeVisible({ timeout: 15_000 })
+  await page.getByLabel('Agent', { exact: true }).selectOption('ANTIGRAVITY')
+  await expect(page.getByText('Input tokens · 100 observed tokens')).toBeVisible()
+  const selectedAgent = await page.evaluate(() => window.llmMeter.readDailyUsage({ from: '2026-10-27', to: '2026-10-27', zone: 'UTC', provider: 'ANTIGRAVITY' }, crypto.randomUUID()))
+  assert.equal(selectedAgent.status, 200)
+  assert.equal(selectedAgent.body.usage.length, 1)
+  assert.equal(selectedAgent.body.coverage[0].provider, 'ANTIGRAVITY')
+  await page.getByLabel('Agent', { exact: true }).selectOption('CODEX')
+  await expect(page.getByText('Input tokens · 40 observed tokens')).toBeVisible()
+  await writeFile(antigravityTranscript, '{')
+  await page.getByRole('button', { name: 'Refresh usage' }).click()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await page.getByLabel('Agent', { exact: true }).selectOption('')
+  await expect(page.getByRole('alert')).toContainText('No new result', { timeout: 15_000 })
+  await rm(join(brain, 'synthetic-conversation'), { recursive: true })
+  await expect(page.getByRole('alert')).toHaveCount(0, { timeout: 15_000 })
+  // Validates the Antigravity chooser updates its own setting while preserving the configured Codex source.
+  const beforeAntigravitySelection = await page.evaluate(() => window.llmMeter.getBackendState())
+  await application.evaluate(({ dialog }, selected) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] })
+  }, brain)
+  await page.getByRole('button', { name: 'Choose Antigravity brain folder' }).click()
+  await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.generation !== beforeAntigravitySelection.generation }, { timeout: 60_000 }).toBe(true)
+  assert.deepEqual(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')), { sources: { CODEX: sessions, ANTIGRAVITY: brain } })
   const empty = join(root, 'empty-sessions')
   await mkdir(empty)
   const beforeSelection = await page.evaluate(() => window.llmMeter.getBackendState())
@@ -101,11 +140,13 @@ try {
   await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.generation !== beforeSelection.generation }, { timeout: 60_000 }).toBe(true)
   await expect(page.getByText('No recorded usage in this period')).toBeVisible()
   await expect(page.getByRole('table')).toHaveCount(0)
-  assert.deepEqual(JSON.parse(await readFile(join(root, 'settings/settings.json'), 'utf8')), { sessionsDirectory: empty })
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'settings/settings.json'), 'utf8')), { sources: { CODEX: empty, ANTIGRAVITY: brain } })
   await application.close(); application = undefined
   await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
-  if (packaged) {
-    // Validates packaged source selection survives restart without a host Java runtime.
+  {
+    // Validates both independently selected source folders survive a complete application relaunch.
+    delete environment.LLM_METER_SESSIONS_DIRECTORY
+    delete environment.LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY
     application = await launch()
     const reopened = await application.firstWindow()
     await expect.poll(async () => (await reopened.evaluate(() => window.llmMeter.getBackendState())).phase, { timeout: 60_000 }).toBe('ready')
@@ -113,7 +154,7 @@ try {
     await application.close(); application = undefined
     await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
   }
-  console.log('Desktop integration passed: startup, filters, background source updates, pending-to-observed coverage, safe failure recovery, restart, source selection, isolation, and owned Java cleanup.')
+  console.log('Desktop integration passed: both agents, normalized totals, provider/date/metric filters, background updates, safe failure isolation, per-agent settings, relaunch, and owned Java cleanup.')
 } finally {
   if (application) await application.close()
   await rm(root, { recursive: true, force: true })

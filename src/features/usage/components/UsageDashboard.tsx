@@ -6,7 +6,7 @@ import { useUsage } from '../hooks/useUsage'
 import { presetPeriod } from '../model/dates'
 import type { Preset } from '../model/dates'
 import { addTokens, dailyPoints, formatTokens, summarizeUsage } from '../model/usage'
-import type { UsagePeriod } from '../model/usage'
+import type { Agent, UsagePeriod } from '../model/usage'
 import { UsageChart } from './UsageChart'
 import { UsageFilters } from './UsageFilters'
 import { UsageTable } from './UsageTable'
@@ -15,6 +15,7 @@ const initialZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
 export function UsageDashboard() {
   const [selection, setSelection] = useState<{ preset: Preset | 'custom'; period: UsagePeriod }>({ preset: '7d', period: presetPeriod('7d', initialZone) })
+  const [agent, setAgent] = useState<Agent | ''>('')
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
@@ -26,7 +27,7 @@ export function UsageDashboard() {
   const period = selection.preset === 'custom' ? selection.period : presetPeriod(selection.preset, selection.period.zone, now)
   const desktop = useDesktopBackend()
   const available = desktop.state.phase === 'ready'
-  const query = useUsage(period, autoRefresh, { enabled: available, generation: desktop.state.generation, refreshInBackground: !!desktop.bridge })
+  const query = useUsage({ ...period, ...(agent ? { provider: agent } : {}) }, autoRefresh, { enabled: available, generation: desktop.state.generation, refreshInBackground: !!desktop.bridge })
   const rows = query.data?.usage ?? []
   const coverage = query.data?.coverage ?? []
   const pendingSessions = coverage.reduce((sum, item) => sum + item.pendingSessions, 0)
@@ -44,7 +45,7 @@ export function UsageDashboard() {
     { name: 'Observed output tokens', value: totals.outputTokens, note: 'Tokens generated in responses', icon: ArrowDownLeft },
     { name: 'Observed cached input', value: totals.cachedTokens, note: 'A subset of input, never added twice', icon: Layers3 },
   ]
-  const providers = [...new Set(rows.map(row => row.provider))]
+  const providers = [...new Set(coverage.map(row => row.provider))]
   return <div className="app-shell">
     <a className="skip-link" href="#main">Skip to usage overview</a>
     <aside className="sidebar">
@@ -66,8 +67,10 @@ export function UsageDashboard() {
         </div>
         {desktop.bridge && <div className="desktop-toolbar" role="status"><span>{desktop.state.message}</span><div>
           <button className="button" onClick={() => void desktop.bridge?.chooseSessionsFolder()} disabled={desktop.state.phase === 'starting'}>Choose sessions folder</button>
+          <button className="button" onClick={() => void desktop.bridge?.chooseSessionsFolder('ANTIGRAVITY')} disabled={desktop.state.phase === 'starting'}>Choose Antigravity brain folder</button>
           <button className="button" onClick={() => void desktop.bridge?.restartBackend()} disabled={desktop.state.phase === 'starting'}>Restart service</button>
         </div></div>}
+        <div className="agent-filter"><label className="field"><span>Agent</span><select aria-label="Agent" value={agent} onChange={event => setAgent(event.target.value as Agent | '')}><option value="">All configured agents</option><option value="CODEX">Codex</option><option value="ANTIGRAVITY">Antigravity</option></select></label></div>
         <UsageFilters key={`${period.from}|${period.to}|${period.zone}`} period={period} preset={selection.preset}
           onPreset={preset => setSelection({ preset, period: presetPeriod(preset, period.zone) })}
           onApply={next => setSelection({ preset: 'custom', period: next })} />
@@ -77,7 +80,7 @@ export function UsageDashboard() {
         {available && query.isError && <div className="error-banner" role="alert"><div><strong>{stale ? 'Live collection paused. Showing the last successful result.' : 'Usage is unavailable right now.'}</strong><p>{query.error.message}</p></div><button className="button" onClick={() => void query.refetch()} disabled={!available || query.isFetching}>Retry collection</button></div>}
         {hasData && <section className={`coverage-banner ${incomplete ? 'incomplete' : ''}`} aria-label="Collection coverage" aria-live="polite">
           <strong>{incomplete ? `Collection incomplete: ${pendingSessions} ${pendingSessions === 1 ? 'session is' : 'sessions are'} pending token counts.` : 'No pending sessions in this collection.'}{stale ? ' Last successful collection; current coverage is unknown.' : ''}</strong>
-          <p>{observedSessions} {observedSessions === 1 ? 'session has' : 'sessions have'} recorded counters. These counts describe the whole source, not a percentage of tokens or coverage of this date range. Pending usage may fall outside or inside the selected period.</p>
+          <p>{observedSessions} {observedSessions === 1 ? 'session has' : 'sessions have'} recorded counters. These counts describe the selected agents’ sources, not a percentage of tokens or coverage of this date range. Pending usage may fall outside or inside the selected period.</p>
           {incomplete && <p>Values below include only recorded observations. Pending sessions are not counted as zero and are checked again on collection.</p>}
         </section>}
         <section className="metric-grid" aria-label="Selected period observations" aria-busy={pending}>

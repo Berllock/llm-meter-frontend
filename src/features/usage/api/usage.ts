@@ -1,14 +1,14 @@
 import { readDesktopUsage } from '../../../desktop/request'
 import { isDate } from '../model/dates'
 import { metrics } from '../model/usage'
-import type { DailyUsage, DailyUsageCollection, ProviderCoverage, UsagePeriod } from '../model/usage'
+import type { DailyUsage, DailyUsageCollection, ProviderCoverage, UsageQuery } from '../model/usage'
 
 export class UsageApiError extends Error {
   readonly status: number | null
   constructor(message: string, status: number | null = null) { super(message); this.name = 'UsageApiError'; this.status = status }
 }
 
-export function parseDailyUsage(payload: unknown, period: UsagePeriod): DailyUsage[] {
+export function parseDailyUsage(payload: unknown, period: UsageQuery): DailyUsage[] {
   const invalid = () => new UsageApiError('The collected data could not be displayed reliably. Try collecting it again.')
   if (!Array.isArray(payload)) throw invalid()
   const identities = new Set<string>()
@@ -29,7 +29,7 @@ export function parseDailyUsage(payload: unknown, period: UsagePeriod): DailyUsa
   })
 }
 
-export function parseDailyCollection(payload: unknown, period: UsagePeriod): DailyUsageCollection {
+export function parseDailyCollection(payload: unknown, period: UsageQuery): DailyUsageCollection {
   const invalid = () => new UsageApiError('The collected data could not be displayed reliably. Try collecting it again.')
   if (!payload || typeof payload !== 'object') throw invalid()
   const value = payload as Record<string, unknown>
@@ -52,11 +52,12 @@ export function parseDailyCollection(payload: unknown, period: UsagePeriod): Dai
   })
   if ((value.status === 'PARTIAL') !== coverage.some(item => item.pendingSessions > 0)) throw invalid()
   const usage = parseDailyUsage(value.usage, period)
+  if (period.provider && coverage.some(row => row.provider !== period.provider)) throw invalid()
   if (usage.some(row => !providers.has(row.provider) || providers.get(row.provider)!.observedSessions === 0)) throw invalid()
   return { ...period, status: value.status as DailyUsageCollection['status'], usage, coverage }
 }
 
-export async function fetchDailyUsage(period: UsagePeriod, signal?: AbortSignal): Promise<DailyUsageCollection> {
+export async function fetchDailyUsage(period: UsageQuery, signal?: AbortSignal): Promise<DailyUsageCollection> {
   const params = new URLSearchParams(period)
   try {
     const timeout = AbortSignal.timeout(15_000)

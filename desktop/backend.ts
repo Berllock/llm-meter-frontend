@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { BackendState, DesktopPeriod, DesktopResponse } from '../shared/desktop-contract.js'
+import type { AgentSources, BackendState, DesktopPeriod, DesktopResponse } from '../shared/desktop-contract.js'
 
 type Options = {
   jarPath: string
@@ -19,6 +19,7 @@ export function validPeriod(value: unknown): value is DesktopPeriod {
   const p = value as Record<string, unknown>
   const date = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
     && Number.isFinite(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v
+  if (p.provider !== undefined && !['CODEX', 'ANTIGRAVITY'].includes(p.provider as string)) return false
   if (!date(p.from) || !date(p.to) || p.from > p.to || typeof p.zone !== 'string' || p.zone.length > 100) return false
   try { new Intl.DateTimeFormat('en', { timeZone: p.zone }); return true } catch { return false }
 }
@@ -40,22 +41,26 @@ export class BackendManager {
     this.current = { phase, message, generation, revision: this.current.revision + 1 }
     for (const listener of this.listeners) listener(this.state)
   }
-  start(source: string): Promise<void> {
+  start(sources: AgentSources): Promise<void> {
     if (this.starting) return this.starting
     if (this.current.phase === 'ready') return Promise.resolve()
     const epoch = ++this.epoch
-    this.starting = this.launch(source, epoch).finally(() => { this.starting = undefined })
+    this.starting = this.launch(sources, epoch).finally(() => { this.starting = undefined })
     return this.starting
   }
-  private async launch(source: string, epoch: number) {
+  private async launch(sources: AgentSources, epoch: number) {
     await this.release()
     if (epoch !== this.epoch) return
     const generation = randomUUID()
     this.update('starting', 'Starting the local Java service…', generation)
     try {
       if (!(await stat(this.options.jarPath).catch(() => null))?.isFile()) throw new StartupError(this.options.bundledJava ? 'The local service bundle is missing. Reinstall the application.' : 'The backend bundle is missing. Run npm run desktop:prepare and retry.')
-      if (!(await stat(source).catch(() => null))?.isDirectory()) {
-        this.update('needs-source', 'Choose a folder containing your Codex sessions.'); return
+      if (!Object.values(sources).length) {
+        this.update('needs-source', 'Choose a source folder for Codex or Antigravity.'); return
+      }
+      const available = await Promise.all(Object.values(sources).map(async source => (await stat(source).catch(() => null))?.isDirectory() ?? false))
+      if (!available.some(Boolean)) {
+        this.update('needs-source', 'Configured agent folders are unavailable. Choose a source folder again.'); return
       }
       this.directory = await mkdtemp(join(tmpdir(), 'llm-meter-desktop-'))
       if (epoch !== this.epoch) return
@@ -71,7 +76,9 @@ export class BackendManager {
         '-jar', this.options.jarPath, '--server.address=127.0.0.1', '--server.port=0',
         '--spring.config.location=classpath:/application.properties', '--spring.profiles.active=desktop',
         '--spring.devtools.restart.enabled=false', '--spring.main.banner-mode=off', '--logging.level.root=ERROR',
-        `--llm-meter.codex.sessions-directory=${source}`, `--llm-meter.desktop.ready-file=${ready}`,
+        ...(sources.CODEX ? [`--llm-meter.codex.sessions-directory=${sources.CODEX}`] : []),
+        ...(sources.ANTIGRAVITY ? [`--llm-meter.antigravity.brain-directory=${sources.ANTIGRAVITY}`] : []),
+        `--llm-meter.desktop.ready-file=${ready}`,
         `--llm-meter.desktop.instance-id=${generation}`,
       ], { cwd: this.directory, env, stdio: 'ignore', windowsHide: true })
       this.child = child
