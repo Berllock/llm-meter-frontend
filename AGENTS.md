@@ -19,6 +19,7 @@
   Run `npm run check` and relevant browser scenarios after behavioral changes.
 - The desktop shell is Electron with a sandboxed renderer and narrow preload IPC.
   The main process owns Java startup, readiness, token-protected local requests,
-  restart, and shutdown. Java 21 is currently installed separately; runtime bundling
-  and installers remain future work. Preserve browser development mode.
+  restart, and shutdown. Development uses an installed Java 21. Linux x64 portable releases bundle a pinned
+  Java runtime; see `docs/distribution.md`. Preserve browser development mode,
+  the strict release inventory, and separation of development/runtime resources.
 - Do not stage, commit, push, publish, or modify global settings automatically.

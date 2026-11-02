@@ -8,6 +8,7 @@ import type { BackendState, DesktopPeriod, DesktopResponse } from '../shared/des
 type Options = {
   jarPath: string
   javaCommand?: string
+  bundledJava?: boolean
   startupTimeout?: number
   stopTimeout?: number
   launch?: typeof spawn
@@ -52,7 +53,7 @@ export class BackendManager {
     const generation = randomUUID()
     this.update('starting', 'Starting the local Java service…', generation)
     try {
-      if (!(await stat(this.options.jarPath).catch(() => null))?.isFile()) throw new StartupError('The backend bundle is missing. Run npm run desktop:prepare and retry.')
+      if (!(await stat(this.options.jarPath).catch(() => null))?.isFile()) throw new StartupError(this.options.bundledJava ? 'The local service bundle is missing. Reinstall the application.' : 'The backend bundle is missing. Run npm run desktop:prepare and retry.')
       if (!(await stat(source).catch(() => null))?.isDirectory()) {
         this.update('needs-source', 'Choose a folder containing your Codex sessions.'); return
       }
@@ -62,6 +63,9 @@ export class BackendManager {
       this.token = randomBytes(32).toString('hex')
       this.lifetime = new AbortController()
       const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('SPRING_') && !key.replaceAll('_', '').startsWith('LLMMETER')))
+      if (this.options.bundledJava) {
+        for (const key of ['JAVA_HOME', 'JRE_HOME', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'CLASSPATH']) delete env[key]
+      }
       env.LLM_METER_DESKTOP_TOKEN = this.token
       const child = (this.options.launch ?? spawn)(this.options.javaCommand ?? 'java', [
         '-jar', this.options.jarPath, '--server.address=127.0.0.1', '--server.port=0',
@@ -81,8 +85,8 @@ export class BackendManager {
       })
       const deadline = Date.now() + (this.options.startupTimeout ?? 60_000)
       while (epoch === this.epoch && Date.now() < deadline) {
-        if (failed) throw new StartupError('Java could not be started. Install Java 21 or check LLM_METER_JAVA, then retry.')
-        if (child.exitCode !== null || child.signalCode !== null) throw new StartupError('The Java service exited before becoming ready. Check Java 21 and your session folder, then retry.')
+        if (failed) throw new StartupError(this.options.bundledJava ? 'The bundled local service could not be started. Reinstall the application and retry.' : 'Java could not be started. Install Java 21 or check LLM_METER_JAVA, then retry.')
+        if (child.exitCode !== null || child.signalCode !== null) throw new StartupError(this.options.bundledJava ? 'The local service exited before becoming ready. Restart it or choose another sessions folder.' : 'The Java service exited before becoming ready. Check Java 21 and your session folder, then retry.')
         const data = await readFile(ready, 'utf8').catch(() => null)
         if (data) {
           const value = JSON.parse(data) as { port?: number; instanceId?: string }

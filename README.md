@@ -3,7 +3,8 @@
 A local usage dashboard built with React, TypeScript, Vite, and TanStack Query.
 The backend remains the sibling Java/Spring Boot project `../llm-meter-personal`.
 The Electron desktop shell starts and stops its own Java backend. The browser
-workflow remains available. Installers and a bundled Java runtime are future work.
+workflow remains available. Linux x64 portable releases bundle Java and require no
+Java, Maven, or Node installation to run. See [distribution instructions](docs/distribution.md).
 
 ## Run the desktop application
 
@@ -48,7 +49,9 @@ Optional development overrides:
 - `JAVA_HOME`: runtime installation used when no explicit executable is configured.
 - `LLM_METER_BACKEND_PROJECT`: backend project path for preparation.
 - `LLM_METER_SESSIONS_DIRECTORY`: initial source override (not automatically saved).
-- `LLM_METER_USER_DATA_DIR`: isolated settings directory for development/testing.
+- `LLM_METER_USER_DATA_DIR`: isolated settings directory, also supported by packaged builds.
+  Java and source overrides above apply only to development; packaged builds use
+  the included runtime and the normal saved source selection.
 
 Preparation resolves `java.home` from the backend directory and writes an ignored,
 machine-local runtime locator beside the JAR. This supports project-based version
@@ -119,7 +122,9 @@ Unrepresentable sums remain unavailable. Neither quota, remaining allowance,
 model attribution, nor cost estimates are fabricated. Usage timing reflects local
 recorded observations, subject to the backend's coverage and attribution rules.
 
-Each request currently rereads the configured backend source. Polling is deliberately
+Each request rediscovers the configured files and reads their bytes to validate
+content. A bounded in-memory backend cache reuses unchanged parsed observations;
+it does not persist history or eliminate disk reads. Polling is deliberately
 limited to five seconds and has no overlapping retry loop. Browser polling pauses
 in background; desktop polling continues while minimized or hidden and can be
 paused with Auto-refresh. This keeps collecting from files while you use another
@@ -128,6 +133,10 @@ Local requests use `networkMode: 'always'` so they can work without an internet
 connection. Changing filters cancels obsolete requests; each request has a 15-second
 timeout. Future file watching, incremental collection, and server push should be
 based on measured collection cost and correct handling of writes in progress.
+
+Build the portable Linux release with `npm run desktop:dist`; verify it with
+`npm run test:packaged`. Build requirements and generated artifact paths are
+documented in [docs/distribution.md](docs/distribution.md).
 
 ## Layout
 
@@ -169,7 +178,8 @@ ignored under `test-results/`; no real session data belongs in fixtures.
 
 ## Next milestones
 
-1. Bundle a Java runtime and build installers for selected operating systems.
+1. Validate portable Linux releases on additional distributions; add native packages,
+   signing, and other operating systems as separate distribution work.
 2. Measure startup time, memory, and collection cost with representative sources.
 3. Investigate file watching, incremental collection, and push updates.
 4. Add model/cost/quota capabilities only when validated provider data supports them.

@@ -13,3 +13,6 @@ coverage/
 
 dist-desktop/
 resources/backend/
+
+.desktop-build/
+release/

@@ -1,14 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron'
 import { mkdirSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { BackendManager } from './backend.js'
+import { resolveBackendRuntime } from './runtime.js'
 import { readSource, saveSource } from './settings.js'
 
 app.setName('LLM Meter Personal')
-if (!app.isPackaged && process.env.LLM_METER_USER_DATA_DIR) {
+if (process.env.LLM_METER_USER_DATA_DIR) {
   mkdirSync(process.env.LLM_METER_USER_DATA_DIR, { recursive: true })
   app.setPath('userData', process.env.LLM_METER_USER_DATA_DIR)
 }
@@ -68,18 +68,9 @@ if (!app.requestSingleInstanceLock()) app.quit()
 else {
   app.on('second-instance', () => { if (window?.isMinimized()) window.restore(); window?.show(); window?.focus() })
   app.whenReady().then(async () => {
-    const resources = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources')
-    let preparedJava: string | undefined
-    if (!app.isPackaged) {
-      try {
-        const config = JSON.parse(await readFile(join(resources, 'backend/java-runtime.json'), 'utf8')) as { javaCommand?: unknown }
-        if (typeof config.javaCommand === 'string') preparedJava = config.javaCommand
-      } catch { /* Use explicit environment settings or the system Java command. */ }
-    }
-    backend = new BackendManager({
-      jarPath: app.isPackaged ? join(process.resourcesPath, 'backend', 'llm-meter-backend.jar') : join(app.getAppPath(), 'resources', 'backend', 'llm-meter-backend.jar'),
-      javaCommand: process.env.LLM_METER_JAVA || (process.env.JAVA_HOME ? join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java') : preparedJava || 'java'),
-    })
+    backend = new BackendManager(await resolveBackendRuntime({
+      packaged: app.isPackaged, appRoot: app.getAppPath(), resourcesPath: process.resourcesPath,
+    }))
     registerBridge()
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { label: 'File', submenu: [

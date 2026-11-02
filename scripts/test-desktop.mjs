@@ -9,6 +9,14 @@ const root = await mkdtemp(join(tmpdir(), 'meter-electron-test-'))
 const sessions = join(root, 'sessions')
 await mkdir(sessions)
 await copyFile(join(project, 'e2e/fixtures/desktop-session.jsonl'), join(sessions, 'sample.jsonl'))
+const packaged = process.argv.includes('--packaged')
+const executablePath = process.env.LLM_METER_PACKAGED_EXECUTABLE || join(project, 'release/linux-unpacked/llm-meter-personal')
+const settings = join(root, 'settings')
+await mkdir(settings)
+await writeFile(join(settings, 'settings.json'), JSON.stringify({ sessionsDirectory: sessions }))
+const environment = { ...process.env, LLM_METER_USER_DATA_DIR: settings, LLM_METER_SESSIONS_DIRECTORY: sessions, LLM_METER_DESKTOP_HIDE_WINDOW: '1' }
+if (packaged) Object.assign(environment, { PATH: '/nonexistent-build-tools', JAVA_HOME: '/nonexistent-jdk', LLM_METER_JAVA: '/nonexistent-java', JAVA_TOOL_OPTIONS: '--invalid-host-java-option', _JAVA_OPTIONS: '--invalid-host-java-option', JDK_JAVA_OPTIONS: '--invalid-host-java-option' })
+const launch = () => electron.launch({ ...(packaged ? { executablePath, args: [] } : { args: [project] }), env: environment, timeout: 30_000 })
 let application
 async function ownedJavaProcesses() {
   if (process.platform !== 'linux') return []
@@ -21,14 +29,21 @@ async function ownedJavaProcesses() {
 }
 try {
   // Validates real Java startup, isolated renderer access, observed data, restart, and owned-process cleanup.
-  application = await electron.launch({ args: [project], env: { ...process.env, LLM_METER_USER_DATA_DIR: join(root, 'settings'), LLM_METER_SESSIONS_DIRECTORY: sessions, LLM_METER_DESKTOP_HIDE_WINDOW: '1' }, timeout: 30_000 })
+  application = await launch()
+  assert.equal(await application.evaluate(({ app }) => app.isPackaged), packaged)
   const page = await application.firstWindow()
   await expect.poll(async () => (await page.evaluate(() => window.llmMeter.getBackendState())).phase, { timeout: 60_000 }).toBe('ready')
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined')
   assert.equal(await page.evaluate(() => typeof window.process), 'undefined')
   const state = await page.evaluate(() => window.llmMeter.getBackendState())
   const originalChildren = await ownedJavaProcesses()
-  if (process.platform === 'linux') assert.equal(originalChildren.length, 1)
+  if (process.platform === 'linux') {
+    assert.equal(originalChildren.length, 1)
+    if (packaged) {
+      const { readlink } = await import('node:fs/promises')
+      assert.equal(await readlink(`/proc/${originalChildren[0]}/exe`), join(dirname(executablePath), 'resources/runtime/bin/java'))
+    }
+  }
   const result = await page.evaluate(() => window.llmMeter.readDailyUsage({ from: '2026-10-20', to: '2026-10-30', zone: 'UTC' }, crypto.randomUUID()))
   assert.equal(result.status, 200)
   assert.deepEqual(result.body, { from: '2026-10-20', to: '2026-10-30', zone: 'UTC', status: 'COMPLETE', coverage: [{ provider: 'CODEX', observedSessions: 1, pendingSessions: 0 }], usage: [{ provider: 'CODEX', date: '2026-10-25', zone: 'UTC', inputTokens: 160, outputTokens: 16, cachedTokens: 80 }] })
@@ -89,6 +104,15 @@ try {
   assert.deepEqual(JSON.parse(await readFile(join(root, 'settings/settings.json'), 'utf8')), { sessionsDirectory: empty })
   await application.close(); application = undefined
   await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
+  if (packaged) {
+    // Validates packaged source selection survives restart without a host Java runtime.
+    application = await launch()
+    const reopened = await application.firstWindow()
+    await expect.poll(async () => (await reopened.evaluate(() => window.llmMeter.getBackendState())).phase, { timeout: 60_000 }).toBe('ready')
+    await expect(reopened.getByText('No recorded usage in this period')).toBeVisible()
+    await application.close(); application = undefined
+    await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
+  }
   console.log('Desktop integration passed: startup, filters, background source updates, pending-to-observed coverage, safe failure recovery, restart, source selection, isolation, and owned Java cleanup.')
 } finally {
   if (application) await application.close()
