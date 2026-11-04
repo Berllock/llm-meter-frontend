@@ -25,3 +25,16 @@ describe('usage calculations', () => {
   // Validates that a sum outside JavaScript's exact integer range is never presented as a precise count.
   it('rejects unsafe aggregate precision', () => expect(addTokens([Number.MAX_SAFE_INTEGER, 1])).toBeNull())
 })
+
+// Validates credit decimals are summed exactly and never treated as token counts or floating-point estimates.
+it('keeps recorded credit arithmetic exact and unknown values unavailable', async () => {
+  const { sumCredits, formatCredits, validCredits } = await import('./usage')
+  expect(sumCredits(['0.1', '0.2'])).toBe('0.3')
+  expect(sumCredits(['1.234567890123456789', '0.000000000000000001'])).toBe('1.23456789012345679')
+  expect(sumCredits([])).toBeNull()
+  expect(sumCredits(['1', null])).toBeNull()
+  expect(sumCredits(['999999999999999999', '1'])).toBeNull()
+  expect(validCredits(1.5)).toBe(false)
+  expect(validCredits('-1')).toBe(false)
+  expect(formatCredits(null)).toBe('—')
+})

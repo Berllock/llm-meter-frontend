@@ -1,6 +1,6 @@
 import { readDesktopUsage } from '../../../desktop/request'
 import { isDate } from '../model/dates'
-import { metrics } from '../model/usage'
+import { metrics, validCredits } from '../model/usage'
 import type { DailyUsage, DailyUsageCollection, ProviderCoverage, UsageQuery } from '../model/usage'
 
 export class UsageApiError extends Error {
@@ -21,11 +21,12 @@ export function parseDailyUsage(payload: unknown, period: UsageQuery): DailyUsag
       const count = row[metric]
       if (count !== null && (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0)) throw invalid()
     }
+    if (row.credits !== undefined && row.credits !== null && !validCredits(row.credits)) throw invalid()
     const identity = `${row.provider}:${row.date}`
     if (identities.has(identity)) throw invalid()
     identities.add(identity)
     return { provider: row.provider, date: row.date, zone: period.zone,
-      inputTokens: row.inputTokens as number | null, outputTokens: row.outputTokens as number | null, cachedTokens: row.cachedTokens as number | null }
+      inputTokens: row.inputTokens as number | null, outputTokens: row.outputTokens as number | null, cachedTokens: row.cachedTokens as number | null, ...(row.credits !== undefined ? { credits: row.credits as string | null } : {}) }
   })
 }
 
@@ -46,7 +47,8 @@ export function parseDailyCollection(payload: unknown, period: UsageQuery): Dail
       sessions += item[key]
       if (!Number.isSafeInteger(sessions)) throw invalid()
     }
-    const row = { provider: item.provider, observedSessions: item.observedSessions as number, pendingSessions: item.pendingSessions as number }
+    if (item.tokenCountsAvailable !== undefined && typeof item.tokenCountsAvailable !== 'boolean') throw invalid()
+    const row = { ...(item.tokenCountsAvailable === false ? { tokenCountsAvailable: false } : {}), provider: item.provider, observedSessions: item.observedSessions as number, pendingSessions: item.pendingSessions as number }
     providers.set(row.provider, row)
     return row
   })
@@ -54,6 +56,7 @@ export function parseDailyCollection(payload: unknown, period: UsageQuery): Dail
   const usage = parseDailyUsage(value.usage, period)
   if (period.provider && coverage.some(row => row.provider !== period.provider)) throw invalid()
   if (usage.some(row => !providers.has(row.provider) || providers.get(row.provider)!.observedSessions === 0)) throw invalid()
+  if (usage.some(row => providers.get(row.provider)?.tokenCountsAvailable === false && metrics.some(metric => row[metric] !== null))) throw invalid()
   return { ...period, status: value.status as DailyUsageCollection['status'], usage, coverage }
 }
 

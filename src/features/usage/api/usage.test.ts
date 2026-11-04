@@ -77,3 +77,13 @@ it('encodes and validates agent selection', async () => {
   const foreign = { ...collection(period, [{ ...row, provider: 'ANTIGRAVITY' }]), coverage: [{ provider: 'ANTIGRAVITY', observedSessions: 1, pendingSessions: 0 }] }
   expect(() => parseDailyCollection(foreign, query)).toThrow(UsageApiError)
 })
+
+// Validates credits and token capability remain distinct and inconsistent token claims are rejected.
+it('validates recorded Kiro credits separately from unavailable tokens', () => {
+  const payload = { ...collection(period), usage: [{ ...row, provider: 'KIRO', inputTokens: null, outputTokens: null, cachedTokens: null, credits: '0.3' }],
+    coverage: [{ provider: 'KIRO', observedSessions: 1, pendingSessions: 0, tokenCountsAvailable: false }] }
+  expect(parseDailyCollection(payload, period).usage[0].credits).toBe('0.3')
+  expect(parseDailyCollection(payload, period).coverage[0].tokenCountsAvailable).toBe(false)
+  expect(() => parseDailyCollection({ ...payload, usage: [{ ...payload.usage[0], credits: 0.3 }] }, period)).toThrow(UsageApiError)
+  expect(() => parseDailyCollection({ ...payload, usage: [{ ...payload.usage[0], inputTokens: 0 }] }, period)).toThrow(UsageApiError)
+})

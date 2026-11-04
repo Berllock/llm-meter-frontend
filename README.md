@@ -25,8 +25,8 @@ Electron launch can download its runtime. After preparing, `npm run desktop:star
 reopens the existing build; rerun `npm run desktop` after source changes.
 
 Desktop startup discovers existing default sources at `~/.codex/sessions` and
-`~/.gemini/antigravity/brain`. Use **Choose sessions folder** for Codex and
-**Choose Antigravity brain folder** for Antigravity; each source is saved separately
+`~/.gemini/antigravity/brain`, plus Kiro CLI at `~/.kiro/sessions`. Use **Choose sessions folder** for Codex and
+**Choose Antigravity brain folder** for Antigravity and **Choose Kiro CLI sessions folder** for Kiro; each source is saved separately
 in Electron's user-data settings. Existing Codex-only settings remain readable.
 **Restart service** recovers from startup or process failures. No usage history is
 persisted by this setting. Invalid source contents still yield a safe collection failure. Valid identified
@@ -52,6 +52,7 @@ Optional development overrides:
 - `LLM_METER_BACKEND_PROJECT`: backend project path for preparation.
 - `LLM_METER_SESSIONS_DIRECTORY`: initial Codex source override (not automatically saved).
 - `LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY`: initial Antigravity brain source override.
+- `LLM_METER_KIRO_SESSIONS_DIRECTORY`: initial Kiro CLI sessions source override.
 - `LLM_METER_USER_DATA_DIR`: isolated settings directory, also supported by packaged builds.
   Java and source overrides above apply only to development; packaged builds use
   the included runtime and the normal saved source selection.
@@ -95,7 +96,7 @@ The desktop bridge bypasses these Vite proxies; its backend has its own private 
 
 ## First milestone
 
-- Agent selection: all configured agents, Codex, or Antigravity. Cards, chart,
+- Agent selection: all configured agents, Codex, Antigravity, or Kiro. Cards, chart,
   table, and coverage use the same query scope; caches stay isolated by agent.
 - Inclusive period and time-zone filters; Today, 7-day, and 30-day presets.
 - Presets follow the selected local day across midnight, checked every minute
@@ -113,10 +114,15 @@ The desktop bridge bypasses these Vite proxies; its backend has its own private 
 ## Data contract and limits
 
 The UI consumes `GET /api/usage/daily/collection?from=YYYY-MM-DD&to=YYYY-MM-DD&zone=...`.
-Optional `provider=CODEX` or `provider=ANTIGRAVITY` selects an agent before backend
+Optional `provider=CODEX`, `provider=ANTIGRAVITY`, or `provider=KIRO` selects an agent before backend
 collection. Without it, normalized observations from all configured agents are
 combined in the dashboard. Antigravity input is normalized to include cached reads;
 see the backend [integration contract](../llm-meter-personal/docs/antigravity-integration.md).
+Kiro's native format exposes recorded credits rather than exact tokens. Optional
+`credits` values are decimal strings and are displayed separately. Coverage declares
+`tokenCountsAvailable`; unsupported token sources are excluded from an explicitly
+labeled known token subtotal. Their credits/context percentages are never converted
+to tokens. See [Kiro integration](../llm-meter-personal/docs/kiro-integration.md).
 The response echoes the period and includes `usage`, `coverage` per provider, and
 `status` (`COMPLETE` or `PARTIAL`). Legacy array and cumulative endpoints remain
 strict and are not used by the dashboard.

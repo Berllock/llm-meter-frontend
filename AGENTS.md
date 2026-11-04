@@ -15,10 +15,14 @@
   source-wide session coverage. Never label partial observations as complete totals
   or turn session counts into token coverage percentages. Preserve hard failures,
   stale coverage labeling, and query/source isolation. Legacy endpoints remain strict.
-- Codex and Antigravity are separate agent/provider adapters, independent of the
+- Codex, Antigravity and Kiro are separate agent/provider adapters, independent of the
   model vendor. Agent filters must reach the backend before collection and be part
   of query-cache identity. Normalize Antigravity cache-exclusive raw input before
   summing providers. See the backend `docs/antigravity-integration.md`.
+- Kiro native usage is credits-only. Preserve exact decimal strings, separate
+  credit arithmetic, null token counts and explicit token-subtotal exclusions.
+  Never convert credits/context percentages into tokens. Tests must configure all
+  three synthetic roots to prevent real-home source autodiscovery.
 - Prioritize integrations and core product flows over packaging polish. Project
   filtering is future work requiring validated workspace/session attribution.
 - Add a brief English comment above new tests explaining what they validate.

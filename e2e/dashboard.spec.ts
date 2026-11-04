@@ -178,3 +178,34 @@ test('aggregates configured agents and filters without leaking another agent res
   await page.getByLabel('Agent', { exact: true }).selectOption('')
   await expect(summary).toContainText('330')
 })
+
+// Validates credit-only Kiro usage is visible without contaminating token subtotals, filters, or coverage.
+test('shows Kiro credits separately and labels the known token subtotal', async ({ page }) => {
+  await page.route('**/api/usage/daily/collection?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    const provider = params.get('provider')
+    const all = [
+      { provider: 'CODEX', date: params.get('to'), zone: params.get('zone'), inputTokens: 100, outputTokens: 10, cachedTokens: 50 },
+      { provider: 'KIRO', date: params.get('to'), zone: params.get('zone'), inputTokens: null, outputTokens: null, cachedTokens: null, credits: '1.75' },
+    ]
+    const usage = provider ? all.filter(row => row.provider === provider) : all
+    return route.fulfill({ json: { from: params.get('from'), to: params.get('to'), zone: params.get('zone'), status: 'COMPLETE', usage,
+      coverage: usage.map(row => ({ provider: row.provider, observedSessions: 1, pendingSessions: 0, tokenCountsAvailable: row.provider !== 'KIRO' })) } })
+  })
+  await page.goto('/')
+  const tokens = page.getByRole('region', { name: 'Selected period observations' })
+  await expect(tokens).toContainText('Known token subtotal')
+  await expect(tokens).toContainText('110')
+  await expect(page.getByRole('region', { name: 'Kiro credit observations' })).toContainText('1.75')
+  await expect(page.getByRole('region', { name: 'Unavailable token counts' })).toContainText('KIRO')
+  await expect(page.getByRole('table')).toContainText('Credits')
+  await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
+  await expect(page.getByRole('table')).not.toContainText('CODEX')
+  await expect(tokens).not.toContainText('110')
+  await expect(tokens).toContainText('—')
+  await expect(page.getByRole('region', { name: 'Kiro credit observations' })).toContainText('1.75')
+  await page.getByLabel('Agent', { exact: true }).selectOption('CODEX')
+  await expect(tokens).toContainText('Observed tokens')
+  await expect(tokens).toContainText('110')
+  await expect(page.getByRole('region', { name: 'Kiro credit observations' })).toHaveCount(0)
+})

@@ -6,7 +6,7 @@ export async function readSources(directory: string): Promise<AgentSources> {
   try {
     const value = JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')) as { sessionsDirectory?: unknown; sources?: Record<string, unknown> }
     const result: AgentSources = {}
-    for (const provider of ['CODEX', 'ANTIGRAVITY'] as const) {
+    for (const provider of ['CODEX', 'ANTIGRAVITY', 'KIRO'] as const) {
       const source = value.sources?.[provider] ?? (provider === 'CODEX' ? value.sessionsDirectory : undefined)
       if (typeof source === 'string' && isAbsolute(source)) result[provider] = source
     }

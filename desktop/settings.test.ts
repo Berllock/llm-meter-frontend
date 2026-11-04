@@ -36,3 +36,14 @@ it('preserves both agents when migrating old settings', async () => {
     expect(await readSources(root)).toEqual({ CODEX: join(root, 'codex'), ANTIGRAVITY: join(root, 'brain') })
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+// Validates selecting Kiro preserves existing agent folders and survives rereading settings.
+it('persists Kiro alongside the other agents', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'meter-settings-'))
+  try {
+    await saveSource(root, join(root, 'codex'), 'CODEX')
+    await saveSource(root, join(root, 'brain'), 'ANTIGRAVITY')
+    await saveSource(root, join(root, 'kiro'), 'KIRO')
+    expect(await readSources(root)).toEqual({ CODEX: join(root, 'codex'), ANTIGRAVITY: join(root, 'brain'), KIRO: join(root, 'kiro') })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

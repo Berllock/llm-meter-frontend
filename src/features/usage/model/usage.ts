@@ -1,9 +1,9 @@
 export const metrics = ['inputTokens', 'outputTokens', 'cachedTokens'] as const
 export type Metric = (typeof metrics)[number]
 export type TokenCounts = Readonly<Record<Metric, number | null>>
-export type DailyUsage = TokenCounts & Readonly<{ provider: string; date: string; zone: string }>
+export type DailyUsage = TokenCounts & Readonly<{ provider: string; date: string; zone: string; credits?: string | null }>
 export type UsagePeriod = Readonly<{ from: string; to: string; zone: string }>
-export const agents = ['CODEX', 'ANTIGRAVITY'] as const
+export const agents = ['CODEX', 'ANTIGRAVITY', 'KIRO'] as const
 export type Agent = (typeof agents)[number]
 export type UsageQuery = UsagePeriod & Readonly<{ provider?: Agent }>
 export type DailyPoint = TokenCounts & Readonly<{ date: string }>
@@ -34,9 +34,30 @@ export function formatTokens(value: number | null, compact = false): string {
   return new Intl.NumberFormat('en-US', compact ? { notation: 'compact', maximumFractionDigits: 1 } : {}).format(value)
 }
 
-export type ProviderCoverage = Readonly<{ provider: string; observedSessions: number; pendingSessions: number }>
+export type ProviderCoverage = Readonly<{ provider: string; observedSessions: number; pendingSessions: number; tokenCountsAvailable?: boolean }>
 export type DailyUsageCollection = UsagePeriod & Readonly<{
   status: 'COMPLETE' | 'PARTIAL'
   usage: DailyUsage[]
   coverage: ProviderCoverage[]
 }>
+
+// Credits use decimal strings so aggregation never introduces floating-point token/currency conversions.
+export function validCredits(value: unknown): value is string {
+  return typeof value === 'string' && /^(0|[1-9]\d{0,17})(\.\d{1,18})?$/.test(value)
+}
+export function sumCredits(values: readonly (string | null | undefined)[]): string | null {
+  if (!values.length || values.some(value => !validCredits(value))) return null
+  const scale = 10n ** 18n
+  const total = values.reduce<bigint>((sum, value) => {
+    const [whole, fraction = ''] = value!.split('.')
+    return sum + BigInt(whole) * scale + BigInt(fraction.padEnd(18, '0'))
+  }, 0n)
+  if (total / scale >= 10n ** 18n) return null
+  const fraction = (total % scale).toString().padStart(18, '0').replace(/0+$/, '')
+  return (total / scale).toString() + (fraction ? '.' + fraction : '')
+}
+export function formatCredits(value: string | null): string {
+  if (value === null) return '—'
+  const [whole, fraction = ''] = value.split('.')
+  return new Intl.NumberFormat('en-US').format(BigInt(whole)) + (fraction ? '.' + fraction.slice(0, 3) + (fraction.length > 3 ? '…' : '') : '')
+}

@@ -19,7 +19,7 @@ export function validPeriod(value: unknown): value is DesktopPeriod {
   const p = value as Record<string, unknown>
   const date = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
     && Number.isFinite(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v
-  if (p.provider !== undefined && !['CODEX', 'ANTIGRAVITY'].includes(p.provider as string)) return false
+  if (p.provider !== undefined && !['CODEX', 'ANTIGRAVITY', 'KIRO'].includes(p.provider as string)) return false
   if (!date(p.from) || !date(p.to) || p.from > p.to || typeof p.zone !== 'string' || p.zone.length > 100) return false
   try { new Intl.DateTimeFormat('en', { timeZone: p.zone }); return true } catch { return false }
 }
@@ -78,6 +78,7 @@ export class BackendManager {
         '--spring.devtools.restart.enabled=false', '--spring.main.banner-mode=off', '--logging.level.root=ERROR',
         ...(sources.CODEX ? [`--llm-meter.codex.sessions-directory=${sources.CODEX}`] : []),
         ...(sources.ANTIGRAVITY ? [`--llm-meter.antigravity.brain-directory=${sources.ANTIGRAVITY}`] : []),
+        ...(sources.KIRO ? [`--llm-meter.kiro.sessions-directory=${sources.KIRO}`] : []),
         `--llm-meter.desktop.ready-file=${ready}`,
         `--llm-meter.desktop.instance-id=${generation}`,
       ], { cwd: this.directory, env, stdio: 'ignore', windowsHide: true })

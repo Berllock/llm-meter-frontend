@@ -34,7 +34,7 @@ function serialize(action: () => Promise<void>) {
 async function restart() { await backend.stop(); if (!quitting) await backend.start(sources) }
 async function chooseSource(provider: DesktopAgent = 'CODEX') {
   if (!window) return
-  const result = await dialog.showOpenDialog(window, { title: provider === 'CODEX' ? 'Choose Codex sessions folder' : 'Choose Antigravity brain folder', properties: ['openDirectory'] })
+  const result = await dialog.showOpenDialog(window, { title: { CODEX: 'Choose Codex sessions folder', ANTIGRAVITY: 'Choose Antigravity brain folder', KIRO: 'Choose Kiro CLI sessions folder' }[provider], properties: ['openDirectory'] })
   if (result.canceled || !result.filePaths[0] || quitting) return
   await saveSource(app.getPath('userData'), result.filePaths[0], provider)
   sources = { ...sources, [provider]: result.filePaths[0] }
@@ -45,7 +45,7 @@ function registerBridge() {
   ipcMain.handle('meter:restart', event => { requireTrusted(event); return serialize(restart) })
   ipcMain.handle('meter:choose-source', (event, provider: unknown = 'CODEX') => {
     requireTrusted(event)
-    if (provider !== 'CODEX' && provider !== 'ANTIGRAVITY') throw new Error('Invalid agent')
+    if (provider !== 'CODEX' && provider !== 'ANTIGRAVITY' && provider !== 'KIRO') throw new Error('Invalid agent')
     return serialize(() => chooseSource(provider))
   })
   ipcMain.handle('meter:daily', async (event, period: unknown, id: unknown) => {
@@ -81,15 +81,17 @@ else {
       { label: 'File', submenu: [
         { label: 'Choose sessions folder…', click: () => { void serialize(() => chooseSource()) } },
         { label: 'Choose Antigravity brain folder…', click: () => { void serialize(() => chooseSource('ANTIGRAVITY')) } },
+        { label: 'Choose Kiro CLI sessions folder…', click: () => { void serialize(() => chooseSource('KIRO')) } },
         { label: 'Restart local service', click: () => { void serialize(restart) } }, { type: 'separator' }, { role: 'quit' },
       ] },
       { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
     ]))
     createWindow()
     sources = await readSources(app.getPath('userData'))
-    const defaults: AgentSources = { CODEX: join(homedir(), '.codex', 'sessions'), ANTIGRAVITY: join(homedir(), '.gemini', 'antigravity', 'brain') }
-    for (const provider of ['CODEX', 'ANTIGRAVITY'] as const) {
-      const override = !app.isPackaged && process.env[provider === 'CODEX' ? 'LLM_METER_SESSIONS_DIRECTORY' : 'LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY']
+    const defaults: AgentSources = { CODEX: join(homedir(), '.codex', 'sessions'), ANTIGRAVITY: join(homedir(), '.gemini', 'antigravity', 'brain'), KIRO: join(homedir(), '.kiro', 'sessions') }
+    const environmentKeys = { CODEX: 'LLM_METER_SESSIONS_DIRECTORY', ANTIGRAVITY: 'LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY', KIRO: 'LLM_METER_KIRO_SESSIONS_DIRECTORY' }
+    for (const provider of ['CODEX', 'ANTIGRAVITY', 'KIRO'] as const) {
+      const override = !app.isPackaged && process.env[environmentKeys[provider]]
       if (override) sources[provider] = override
       else if (!sources[provider] && defaults[provider] && existsSync(defaults[provider])) sources[provider] = defaults[provider]
     }

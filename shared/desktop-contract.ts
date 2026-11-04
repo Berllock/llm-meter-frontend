@@ -4,7 +4,7 @@ export type BackendState = {
   revision: number
   generation: string
 }
-export type DesktopAgent = 'CODEX' | 'ANTIGRAVITY'
+export type DesktopAgent = 'CODEX' | 'ANTIGRAVITY' | 'KIRO'
 export type AgentSources = Partial<Record<DesktopAgent, string>>
 export type DesktopPeriod = { from: string; to: string; zone: string; provider?: DesktopAgent }
 export type DesktopResponse = { status: number; body: unknown }

@@ -13,10 +13,12 @@ const packaged = process.argv.includes('--packaged')
 const executablePath = process.env.LLM_METER_PACKAGED_EXECUTABLE || join(project, 'release/linux-unpacked/llm-meter-personal')
 const brain = join(root, 'brain')
 await mkdir(brain)
+const kiro = join(root, 'kiro')
+await mkdir(kiro)
 const settings = join(root, 'settings')
 await mkdir(settings)
-await writeFile(join(settings, 'settings.json'), JSON.stringify({ sources: { CODEX: sessions, ANTIGRAVITY: brain } }))
-const environment = { ...process.env, LLM_METER_USER_DATA_DIR: settings, LLM_METER_SESSIONS_DIRECTORY: sessions, LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY: brain, LLM_METER_DESKTOP_HIDE_WINDOW: '1' }
+await writeFile(join(settings, 'settings.json'), JSON.stringify({ sources: { CODEX: sessions, ANTIGRAVITY: brain, KIRO: kiro } }))
+const environment = { ...process.env, LLM_METER_USER_DATA_DIR: settings, LLM_METER_SESSIONS_DIRECTORY: sessions, LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY: brain, LLM_METER_KIRO_SESSIONS_DIRECTORY: kiro, LLM_METER_DESKTOP_HIDE_WINDOW: '1' }
 if (packaged) Object.assign(environment, { PATH: '/nonexistent-build-tools', JAVA_HOME: '/nonexistent-jdk', LLM_METER_JAVA: '/nonexistent-java', JAVA_TOOL_OPTIONS: '--invalid-host-java-option', _JAVA_OPTIONS: '--invalid-host-java-option', JDK_JAVA_OPTIONS: '--invalid-host-java-option' })
 const launch = () => electron.launch({ ...(packaged ? { executablePath, args: [] } : { args: [project] }), env: environment, timeout: 30_000 })
 let application
@@ -49,7 +51,7 @@ try {
   const result = await page.evaluate(() => window.llmMeter.readDailyUsage({ from: '2026-10-20', to: '2026-10-30', zone: 'UTC' }, crypto.randomUUID()))
   assert.equal(result.status, 200)
   result.body.coverage.sort((a, b) => a.provider.localeCompare(b.provider))
-  assert.deepEqual(result.body, { from: '2026-10-20', to: '2026-10-30', zone: 'UTC', status: 'COMPLETE', coverage: [{ provider: 'ANTIGRAVITY', observedSessions: 0, pendingSessions: 0 }, { provider: 'CODEX', observedSessions: 1, pendingSessions: 0 }], usage: [{ provider: 'CODEX', date: '2026-10-25', zone: 'UTC', inputTokens: 160, outputTokens: 16, cachedTokens: 80 }] })
+  assert.deepEqual(result.body, { from: '2026-10-20', to: '2026-10-30', zone: 'UTC', status: 'COMPLETE', coverage: [{ provider: 'ANTIGRAVITY', observedSessions: 0, pendingSessions: 0, tokenCountsAvailable: true }, { provider: 'CODEX', observedSessions: 1, pendingSessions: 0, tokenCountsAvailable: true }, { provider: 'KIRO', observedSessions: 0, pendingSessions: 0, tokenCountsAvailable: false }], usage: [{ provider: 'CODEX', date: '2026-10-25', zone: 'UTC', inputTokens: 160, outputTokens: 16, cachedTokens: 80 }] })
   await page.getByLabel('Start date').fill('2026-10-20')
   await page.getByLabel('End date').fill('2026-10-30')
   await page.getByLabel('Time zone').fill('UTC')
@@ -121,6 +123,34 @@ try {
   await expect(page.getByRole('alert')).toContainText('No new result', { timeout: 15_000 })
   await rm(join(brain, 'synthetic-conversation'), { recursive: true })
   await expect(page.getByRole('alert')).toHaveCount(0, { timeout: 15_000 })
+  // Validates Kiro contributes recorded credits without fabricated tokens and remains isolated by agent.
+  const kiroSession = join(kiro, 'synthetic-kiro')
+  await mkdir(kiroSession)
+  await writeFile(join(kiroSession, 'session.json'), JSON.stringify({ schemaVersion: '1.0.0', dataModelVersion: 1, id: 'synthetic-kiro' }))
+  await writeFile(join(kiroSession, 'messages.jsonl'), JSON.stringify({ id: 'credit-event', timestamp: '2026-10-27T12:05:00Z', payload: { type: 'usage_summary', executionId: 'credit-execution', status: 'success', promptTurnSummaries: [{ unit: 'credit', usage: 1.75 }] } }) + '\n')
+  await expect(page.getByRole('region', { name: 'Kiro credit observations' })).toContainText('1.75', { timeout: 15_000 })
+  await expect(page.getByText('Input tokens · 40 observed tokens')).toBeVisible()
+  await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
+  await expect(page.getByRole('table')).not.toContainText('CODEX')
+  await expect(page.getByRole('region', { name: 'Selected period observations' })).toContainText('—')
+  const creditResult = await page.evaluate(() => window.llmMeter.readDailyUsage({ from: '2026-10-27', to: '2026-10-27', zone: 'UTC', provider: 'KIRO' }, crypto.randomUUID()))
+  assert.equal(creditResult.status, 200)
+  assert.equal(creditResult.body.usage[0].credits, '1.75')
+  assert.equal(creditResult.body.usage[0].inputTokens, null)
+  assert.equal(creditResult.body.coverage[0].tokenCountsAvailable, false)
+  await page.getByLabel('Agent', { exact: true }).selectOption('CODEX')
+  await writeFile(join(kiroSession, 'messages.jsonl'), '{')
+  await page.getByRole('button', { name: 'Refresh usage' }).click()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await page.getByLabel('Agent', { exact: true }).selectOption('')
+  await expect(page.getByRole('alert')).toContainText('No new result', { timeout: 15_000 })
+  await rm(kiroSession, { recursive: true })
+  await expect(page.getByRole('alert')).toHaveCount(0, { timeout: 15_000 })
+  // Validates the third native source chooser saves Kiro without replacing the other configured agents.
+  const beforeKiroSelection = await page.evaluate(() => window.llmMeter.getBackendState())
+  await application.evaluate(({ dialog }, selected) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] }) }, kiro)
+  await page.getByRole('button', { name: 'Choose Kiro CLI sessions folder' }).click()
+  await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.generation !== beforeKiroSelection.generation }, { timeout: 60_000 }).toBe(true)
   // Validates the Antigravity chooser updates its own setting while preserving the configured Codex source.
   const beforeAntigravitySelection = await page.evaluate(() => window.llmMeter.getBackendState())
   await application.evaluate(({ dialog }, selected) => {
@@ -128,7 +158,7 @@ try {
   }, brain)
   await page.getByRole('button', { name: 'Choose Antigravity brain folder' }).click()
   await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.generation !== beforeAntigravitySelection.generation }, { timeout: 60_000 }).toBe(true)
-  assert.deepEqual(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')), { sources: { CODEX: sessions, ANTIGRAVITY: brain } })
+  assert.deepEqual(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')), { sources: { CODEX: sessions, ANTIGRAVITY: brain, KIRO: kiro } })
   const empty = join(root, 'empty-sessions')
   await mkdir(empty)
   const beforeSelection = await page.evaluate(() => window.llmMeter.getBackendState())
@@ -140,13 +170,14 @@ try {
   await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.generation !== beforeSelection.generation }, { timeout: 60_000 }).toBe(true)
   await expect(page.getByText('No recorded usage in this period')).toBeVisible()
   await expect(page.getByRole('table')).toHaveCount(0)
-  assert.deepEqual(JSON.parse(await readFile(join(root, 'settings/settings.json'), 'utf8')), { sources: { CODEX: empty, ANTIGRAVITY: brain } })
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'settings/settings.json'), 'utf8')), { sources: { CODEX: empty, ANTIGRAVITY: brain, KIRO: kiro } })
   await application.close(); application = undefined
   await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
   {
     // Validates both independently selected source folders survive a complete application relaunch.
     delete environment.LLM_METER_SESSIONS_DIRECTORY
     delete environment.LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY
+    delete environment.LLM_METER_KIRO_SESSIONS_DIRECTORY
     application = await launch()
     const reopened = await application.firstWindow()
     await expect.poll(async () => (await reopened.evaluate(() => window.llmMeter.getBackendState())).phase, { timeout: 60_000 }).toBe('ready')
@@ -154,7 +185,7 @@ try {
     await application.close(); application = undefined
     await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
   }
-  console.log('Desktop integration passed: both agents, normalized totals, provider/date/metric filters, background updates, safe failure isolation, per-agent settings, relaunch, and owned Java cleanup.')
+  console.log('Desktop integration passed: three agents, recorded Kiro credits, normalized token subtotals, provider/date/metric filters, background updates, safe failure isolation, per-agent settings, relaunch, and owned Java cleanup.')
 } finally {
   if (application) await application.close()
   await rm(root, { recursive: true, force: true })
