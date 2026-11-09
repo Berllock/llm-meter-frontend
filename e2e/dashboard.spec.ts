@@ -278,3 +278,30 @@ test('shows model usage and honest plan quota observations', async ({ page }) =>
   await expect(quota.getByText('Reported usage is close to this limit.')).toHaveCount(0)
   await expect(page.getByRole('status')).toHaveText('API connected')
 })
+
+// Validates projections remain attached to the reported plan and disappear after stale/error responses or agent changes.
+test('shows recent-pace forecasts and invalidates stale projections', async ({ page }) => {
+  await intercept(page)
+  const end = Math.floor(Date.now() / 1000) * 1000
+  const observedAt = new Date(end).toISOString()
+  const projectedExhaustionAt = new Date(end + 720_000).toISOString()
+  const forecast = { status: 'ESTIMATED', sampleCount: 3, sampleFrom: new Date(end - 240_000).toISOString(), sampleTo: observedAt,
+    percentagePointsPerHour: 300, projectedExhaustionAt, earliestExhaustionAt: projectedExhaustionAt, latestExhaustionAt: projectedExhaustionAt }
+  const response = [{ provider: 'CODEX', status: 'OBSERVED', snapshot: { observedAt, collectedAt: observedAt, planType: 'plus', windows: [
+    { name: 'primary', usedPercent: 40, windowMinutes: 300, resetAt: new Date(end + 3600_000).toISOString(), observedAt, limitId: 'codex', forecast },
+  ] } }]
+  await page.route('**/api/quota?*', route => route.fulfill({ json: new URL(route.request().url()).searchParams.get('provider') === 'KIRO' ? [{ provider: 'KIRO', status: 'UNAVAILABLE', snapshot: null }] : response }))
+  await page.goto('/')
+  const quota = page.getByRole('region', { name: 'Plan quota observations' })
+  await expect(quota).toContainText('Projected exhaustion:')
+  await expect(quota).toContainText('300 percentage points/hour')
+  await page.getByLabel('Configured Codex plan').selectOption('pro')
+  await expect(quota).toContainText('Selected plan differs from the recorded plan')
+  await expect(quota).toContainText('Reported plan: plus')
+  await page.route('**/api/quota?*', route => route.fulfill({ status: 503 }))
+  await page.getByRole('button', { name: 'Refresh quota' }).click()
+  await expect(quota).toContainText('Forecast unavailable: current quota is unverified.')
+  await expect(quota.getByText(/Projected exhaustion:/)).toHaveCount(0)
+  await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
+  await expect(quota.getByText(/Projected exhaustion:/)).toHaveCount(0)
+})

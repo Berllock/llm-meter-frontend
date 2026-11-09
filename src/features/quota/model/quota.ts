@@ -1,5 +1,8 @@
 import type { Agent } from '../../usage/model/usage'
-export type QuotaWindow = Readonly<{ name: string; usedPercent: number; windowMinutes: number; resetAt: string; observedAt: string; limitId: string | null }>
+export type ForecastStatus = 'INSUFFICIENT_DATA' | 'UNVERIFIED_CONTEXT' | 'STALE' | 'RESET_PASSED' | 'EXHAUSTED' | 'DISCONTINUOUS' | 'NO_GROWTH' | 'RESET_FIRST' | 'ESTIMATED'
+export type QuotaForecast = Readonly<{ status: ForecastStatus; sampleCount: number; sampleFrom: string | null; sampleTo: string | null;
+  percentagePointsPerHour: number | null; projectedExhaustionAt: string | null; earliestExhaustionAt: string | null; latestExhaustionAt: string | null }>
+export type QuotaWindow = Readonly<{ name: string; usedPercent: number; windowMinutes: number; resetAt: string; observedAt: string; limitId: string | null; forecast?: QuotaForecast }>
 export type ProviderQuota = Readonly<{ provider: Agent; status: 'OBSERVED' | 'UNAVAILABLE' | 'ERROR'; snapshot: null | { observedAt: string; collectedAt: string; planType: string | null; windows: QuotaWindow[] } }>
 export function windowState(window: QuotaWindow, now: number): 'recent' | 'stale' | 'expired' {
   if (Date.parse(window.resetAt) <= now) return 'expired'

@@ -1,3 +1,4 @@
+import { parseForecast } from './forecast'
 import { agents } from '../../usage/model/usage'
 import type { Agent } from '../../usage/model/usage'
 import type { ProviderQuota, QuotaWindow } from '../model/quota'
@@ -31,8 +32,10 @@ export function parseQuota(value: unknown, provider?: Agent): ProviderQuota[] {
       const key = JSON.stringify([w.limitId, w.name])
       if (windowsSeen.has(key)) throw invalid()
       windowsSeen.add(key)
-      return { name: w.name as string, usedPercent: w.usedPercent, windowMinutes: w.windowMinutes, resetAt: w.resetAt,
+      const window = { name: w.name as string, usedPercent: w.usedPercent, windowMinutes: w.windowMinutes, resetAt: w.resetAt,
         observedAt: w.observedAt, limitId: w.limitId }
+      const forecast = parseForecast(w.forecast, window)
+      return { ...window, ...(forecast ? { forecast } : {}) }
     })
     return { provider: row.provider as Agent, status: 'OBSERVED', snapshot: { observedAt: snapshot.observedAt, collectedAt: snapshot.collectedAt,
       planType: snapshot.planType, windows } }

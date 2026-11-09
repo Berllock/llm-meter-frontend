@@ -159,6 +159,23 @@ try {
   await expect(page.getByRole('alert')).toContainText('No new result', { timeout: 15_000 })
   await rm(kiroSession, { recursive: true })
   await expect(page.getByRole('alert')).toHaveCount(0, { timeout: 15_000 })
+  // Validates real source history produces a forecast through Java, authenticated IPC, parsing and React.
+  const forecastNow = Math.floor(Date.now() / 1000)
+  const zeroCounts = { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 }
+  const forecastRows = [{ ordinal: 0, type: 'session_meta', payload: { id: 'synthetic-forecast', creator_account_id: 'synthetic-account', history_mode: 'paginated' } },
+    ...[20, 30, 40].map((percent, index) => ({ ordinal: index + 1, timestamp: new Date((forecastNow - 240 + index * 120) * 1000).toISOString(),
+      type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: zeroCounts, last_token_usage: zeroCounts },
+        rate_limits: { plan_type: 'plus', limit_id: 'codex', primary: { used_percent: percent, window_minutes: 300, resets_at: forecastNow + 3600 } } } })),
+  ]
+  await writeFile(join(sessions, 'forecast.jsonl'), forecastRows.map(row => JSON.stringify(row)).join('\n') + '\n')
+  const forecastPanel = page.getByRole('region', { name: 'Plan quota observations' })
+  await expect(forecastPanel).toContainText('Recent-pace scenario', { timeout: 15_000 })
+  await expect(forecastPanel).toContainText('300 percentage points/hour')
+  const forecastResult = await page.evaluate(() => window.llmMeter.readQuota('CODEX', crypto.randomUUID()))
+  assert.equal(forecastResult.status, 200)
+  assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.status, 'ESTIMATED')
+  assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.sampleCount, 3)
+  assert.equal(JSON.stringify(forecastResult.body).includes('synthetic-account'), false)
   // Validates the third native source chooser saves Kiro without replacing the other configured agents.
   const beforeKiroSelection = await page.evaluate(() => window.llmMeter.getBackendState())
   await application.evaluate(({ dialog }, selected) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] }) }, kiro)

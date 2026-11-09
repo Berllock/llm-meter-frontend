@@ -1,3 +1,4 @@
+import { QuotaForecastDetails } from './QuotaForecastDetails'
 import { useState } from 'react'
 import { useQuota } from '../hooks/useQuota'
 import { windowState } from '../model/quota'
@@ -32,11 +33,12 @@ export function QuotaPanel({ provider, autoRefresh, runtime, now }: { provider?:
             <progress max={100} value={window.usedPercent} aria-label={`${row.provider} ${window.limitId ?? 'unspecified'} ${window.name} reported usage`} />
             <p>Reset reported for {new Date(window.resetAt).toLocaleString()} · Observed {new Date(window.observedAt).toLocaleString()}</p>
             <p>{state === 'expired' ? 'Reset time has passed; current remaining quota is unknown.' : recent ? 'Recent observation; usage outside these logs may differ.' : 'Stale or unverified observation; current remaining quota is unknown.'}</p>
+            <QuotaForecastDetails window={window} recent={recent} now={now.getTime()} />
             {recent && window.usedPercent >= 80 && <strong>{window.usedPercent >= 100 ? 'Reported allowance exhausted.' : 'Reported usage is close to this limit.'}</strong>}
           </div>
         })}
       </>}
     </div>)}
-    <p className="quota-note">Exhaustion forecasting and plan-upgrade simulation are not available yet. Model usage alone does not establish an absolute token allowance or an API bill.</p>
+    <p className="quota-note">Forecasts use comparable recent quota observations. Plan-upgrade simulation is not available yet. Model usage alone does not establish an absolute token allowance or an API bill.</p>
   </section>
 }

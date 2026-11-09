@@ -235,6 +235,6 @@ The dashboard now shows a reconciled Codex token breakdown by recorded turn mode
 
 An independent `/api/quota` query displays Codex's latest recorded plan windows: percentage used/remaining, duration, reset and observation time. Expired, stale or failed observations explicitly leave current quota unknown. Unsupported agents show unavailable quota. Polling follows the existing automatic-refresh control; manual quota refresh is independent of the calendar.
 
-Configure the Codex plan as reported, Plus or Pro. This choice persists locally and flags disagreement with the recorded plan. It does not simulate upgrade capacity. Exhaustion forecasting, other-plan capacity comparisons and token pricing remain later work requiring verified comparable evidence.
+Configure the Codex plan as reported, Plus or Pro. This choice persists locally and flags disagreement with the recorded plan. It does not simulate upgrade capacity. Recent-pace forecasting now uses comparable Codex source observations, with sampled evidence, fastest/slowest interval scenarios and explicit insufficient/stale outcomes. Other-plan capacity comparisons and token pricing remain later work requiring verified comparable evidence.
 
 Desktop quota calls use the restricted preload bridge and owned authenticated Java service. `npm run desktop` rebuilds the backend and interface for development. Restart an already running backend/frontend after updating the code.

@@ -28,3 +28,5 @@
 .quota-window { padding: 12px 0; }
 .quota-window progress { display: block; width: 100%; accent-color: #758e48; margin: 8px 0; }
 .quota-mismatch { font-weight: 600; color: #805314; }
+
+.quota-forecast { margin-top: 1rem; padding: 1rem; border-left: 3px solid #6c8655; background: #f5f8f1; border-radius: 6px; overflow-wrap: anywhere; }
