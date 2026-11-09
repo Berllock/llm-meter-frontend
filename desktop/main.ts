@@ -55,6 +55,13 @@ function registerBridge() {
     requests.set(id, controller)
     try { return await backend.readDaily(period, controller.signal) } finally { requests.delete(id) }
   })
+  ipcMain.handle('meter:quota', async (event, provider: unknown, id: unknown) => {
+    requireTrusted(event)
+    if (typeof id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(id) || requests.has(id) || requests.size >= 8) return { status: 0, body: null }
+    const controller = new AbortController()
+    requests.set(id, controller)
+    try { return await backend.readQuota(provider, controller.signal) } finally { requests.delete(id) }
+  })
   ipcMain.on('meter:cancel', (event, id: unknown) => { if (trusted(event) && typeof id === 'string') requests.get(id)?.abort() })
   backend.subscribe(state => { if (window && !window.isDestroyed()) window.webContents.send('meter:state-change', state) })
 }

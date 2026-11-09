@@ -1,7 +1,7 @@
 import { readDesktopUsage } from '../../../desktop/request'
 import { isDate } from '../model/dates'
-import { metrics, validCredits } from '../model/usage'
-import type { DailyUsage, DailyUsageCollection, ProviderCoverage, UsageQuery } from '../model/usage'
+import { metrics, validCredits, addTokens } from '../model/usage'
+import type { DailyUsage, DailyUsageCollection, ProviderCoverage, UsageQuery, ModelDailyUsage } from '../model/usage'
 
 export class UsageApiError extends Error {
   readonly status: number | null
@@ -57,7 +57,29 @@ export function parseDailyCollection(payload: unknown, period: UsageQuery): Dail
   if (period.provider && coverage.some(row => row.provider !== period.provider)) throw invalid()
   if (usage.some(row => !providers.has(row.provider) || providers.get(row.provider)!.observedSessions === 0)) throw invalid()
   if (usage.some(row => providers.get(row.provider)?.tokenCountsAvailable === false && metrics.some(metric => row[metric] !== null))) throw invalid()
-  return { ...period, status: value.status as DailyUsageCollection['status'], usage, coverage }
+  let modelUsage: ModelDailyUsage[] | undefined
+  if (value.modelUsage !== undefined) {
+    if (!Array.isArray(value.modelUsage)) throw invalid()
+    const identities = new Set<string>()
+    modelUsage = value.modelUsage.map((entry: unknown) => {
+      if (!entry || typeof entry !== 'object') throw invalid()
+      const item = entry as Record<string, unknown>
+      const base = parseDailyUsage([item], period)[0]
+      if (base.provider !== 'CODEX' || !providers.has('CODEX')
+        || (item.model !== null && (typeof item.model !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(item.model)))) throw invalid()
+      const identity = JSON.stringify([base.date, item.model])
+      if (identities.has(identity)) throw invalid()
+      identities.add(identity)
+      return { ...base, model: item.model as string | null }
+    })
+    const codex = usage.filter(row => row.provider === 'CODEX')
+    if (modelUsage.some(row => !codex.some(day => day.date === row.date))) throw invalid()
+    for (const day of codex) {
+      const parts = modelUsage.filter(row => row.date === day.date)
+      if (!parts.length || metrics.some(metric => addTokens(parts.map(row => row[metric])) !== day[metric])) throw invalid()
+    }
+  }
+  return { ...period, status: value.status as DailyUsageCollection['status'], usage, coverage, ...(modelUsage !== undefined ? { modelUsage } : {}) }
 }
 
 export async function fetchDailyUsage(period: UsageQuery, signal?: AbortSignal): Promise<DailyUsageCollection> {

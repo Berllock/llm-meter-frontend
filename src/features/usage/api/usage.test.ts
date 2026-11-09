@@ -87,3 +87,18 @@ it('validates recorded Kiro credits separately from unavailable tokens', () => {
   expect(() => parseDailyCollection({ ...payload, usage: [{ ...payload.usage[0], credits: 0.3 }] }, period)).toThrow(UsageApiError)
   expect(() => parseDailyCollection({ ...payload, usage: [{ ...payload.usage[0], inputTokens: 0 }] }, period)).toThrow(UsageApiError)
 })
+
+// Validates model buckets reconcile every known/unknown daily component without changing the original totals.
+it('preserves reconciled model observations', () => {
+  const modelUsage = [{ ...row, model: 'model-a', inputTokens: 70, outputTokens: 7 }, { ...row, model: null, inputTokens: 30, outputTokens: 3 }]
+  const result = parseDailyCollection({ ...collection(period, [row]), modelUsage }, period)
+  expect(result.usage).toEqual([row])
+  expect(result.modelUsage).toEqual(modelUsage)
+})
+// Validates duplicate, foreign, missing and inflated model projections cannot be displayed as a valid breakdown.
+it('rejects contradictory model attribution', () => {
+  const model = { ...row, model: 'model-a' }
+  for (const modelUsage of [[], [model, model], [{ ...model, inputTokens: 101 }], [{ ...model, provider: 'KIRO' }], [{ ...model, model: undefined }]]) {
+    expect(() => parseDailyCollection({ ...collection(period, [row]), modelUsage }, period)).toThrow(UsageApiError)
+  }
+})

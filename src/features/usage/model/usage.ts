@@ -6,6 +6,7 @@ export type UsagePeriod = Readonly<{ from: string; to: string; zone: string }>
 export const agents = ['CODEX', 'ANTIGRAVITY', 'KIRO'] as const
 export type Agent = (typeof agents)[number]
 export type UsageQuery = UsagePeriod & Readonly<{ provider?: Agent }>
+export type ModelDailyUsage = DailyUsage & Readonly<{ model: string | null }>
 export type DailyPoint = TokenCounts & Readonly<{ date: string }>
 
 export const metricLabels: Record<Metric, string> = {
@@ -39,6 +40,7 @@ export type DailyUsageCollection = UsagePeriod & Readonly<{
   status: 'COMPLETE' | 'PARTIAL'
   usage: DailyUsage[]
   coverage: ProviderCoverage[]
+  modelUsage?: ModelDailyUsage[]
 }>
 
 // Credits use decimal strings so aggregation never introduces floating-point token/currency conversions.

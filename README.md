@@ -118,6 +118,10 @@ Optional `provider=CODEX`, `provider=ANTIGRAVITY`, or `provider=KIRO` selects an
 collection. Without it, normalized observations from all configured agents are
 combined in the dashboard. Antigravity input is normalized to include cached reads;
 see the backend [integration contract](../llm-meter-personal/docs/antigravity-integration.md).
+Selecting **Kiro** uses a credit-only view: the credit card, date filters, coverage,
+and daily credit records remain visible; token cards, chart controls and token
+columns are hidden. Loading, failure and empty states keep this layout.
+
 Kiro's native format exposes recorded credits rather than exact tokens. Optional
 `credits` values are decimal strings and are displayed separately. Coverage declares
 `tokenCountsAvailable`; unsupported token sources are excluded from an explicitly
@@ -224,3 +228,13 @@ The local ignored `.context` link points to this project's shared Obsidian memor
 Read `AGENTS.md` and that context at the next working session. Code and tests are
 the implementation source of truth; only operational state and inbox observations
 are captured automatically in the vault.
+
+## Codex models and plan windows
+
+The dashboard now shows a reconciled Codex token breakdown by recorded turn model, including unidentified increments. Other agents keep their existing measurements, including Kiro credits. Model metadata does not establish subscription token capacity or API billing.
+
+An independent `/api/quota` query displays Codex's latest recorded plan windows: percentage used/remaining, duration, reset and observation time. Expired, stale or failed observations explicitly leave current quota unknown. Unsupported agents show unavailable quota. Polling follows the existing automatic-refresh control; manual quota refresh is independent of the calendar.
+
+Configure the Codex plan as reported, Plus or Pro. This choice persists locally and flags disagreement with the recorded plan. It does not simulate upgrade capacity. Exhaustion forecasting, other-plan capacity comparisons and token pricing remain later work requiring verified comparable evidence.
+
+Desktop quota calls use the restricted preload bridge and owned authenticated Java service. `npm run desktop` rebuilds the backend and interface for development. Restart an already running backend/frontend after updating the code.

@@ -9,6 +9,8 @@ import { addTokens, dailyPoints, formatTokens, summarizeUsage, sumCredits, forma
 import type { Agent, UsagePeriod } from '../model/usage'
 import { UsageChart } from './UsageChart'
 import { UsageFilters } from './UsageFilters'
+import { QuotaPanel } from '../../quota/components/QuotaPanel'
+import { ModelUsageTable } from './ModelUsageTable'
 import { UsageTable } from './UsageTable'
 
 const initialZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
@@ -16,6 +18,7 @@ const initialZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 export function UsageDashboard() {
   const [selection, setSelection] = useState<{ preset: Preset | 'custom'; period: UsagePeriod }>({ preset: '7d', period: presetPeriod('7d', initialZone) })
   const [agent, setAgent] = useState<Agent | ''>('')
+  const creditOnly = agent === 'KIRO'
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
@@ -56,7 +59,7 @@ export function UsageDashboard() {
     <aside className="sidebar">
       <a className="brand" href="#main" aria-label="LLM Meter home"><span className="brand-icon"><Activity size={22} /></span><span>llm<span className="brand-light">meter</span><small>PERSONAL WORKSPACE</small></span></a>
       <div className="nav-label">WORKSPACE</div>
-      <nav aria-label="Main navigation"><a className="nav-item current" href="#main" aria-current="page"><LayoutDashboard size={18} />Overview<span className="nav-dot" /></a><a className="nav-item" href="#activity"><Activity size={18} />Daily activity</a><a className="nav-item" href="#records"><Database size={18} />Daily records</a></nav>
+      <nav aria-label="Main navigation"><a className="nav-item current" href="#main" aria-current="page"><LayoutDashboard size={18} />Overview<span className="nav-dot" /></a>{!creditOnly && <a className="nav-item" href="#activity"><Activity size={18} />Daily activity</a>}<a className="nav-item" href="#records"><Database size={18} />Daily records</a></nav>
       <div className="sidebar-spacer" />
       <a className="nav-item about-link" href="#about"><CircleHelp size={18} />About your data</a>
       <div className="local-card"><HardDrive size={18} /><strong>Local by design</strong><p>Your usage comes from session files on this device.</p><span><i />Personal workspace</span></div>
@@ -65,7 +68,7 @@ export function UsageDashboard() {
     <main id="main" className="main-content">
       <header className="topbar"><span className="breadcrumb">Workspace <span>/</span> <strong>Overview</strong></span><span className="local-label"><ShieldCheck size={14} /> LOCAL SESSION DATA</span></header>
       <div className="content">
-        <div className="page-heading"><div><p className="eyebrow">A LITTLE CLARITY FOR YOUR AI WORK</p><h1>Your usage, in view<span>.</span></h1><p>Understand the tokens behind your conversations.</p></div>
+        <div className="page-heading"><div><p className="eyebrow">A LITTLE CLARITY FOR YOUR AI WORK</p><h1>Your usage, in view<span>.</span></h1><p>{creditOnly ? 'Understand the credits recorded by your Kiro sessions.' : 'Understand the tokens behind your conversations.'}</p></div>
           <div className="heading-actions"><span className={`connection ${query.isError ? 'offline' : pending ? 'waiting' : ''}`} role="status"><i />{status}</span>
             <button className="button refresh" onClick={() => void query.refetch()} disabled={!available || query.isFetching} aria-label="Refresh usage"><RefreshCw size={16} className={query.isFetching ? 'spinning' : ''} />Refresh</button>
           </div>
@@ -86,23 +89,25 @@ export function UsageDashboard() {
         {available && query.isError && <div className="error-banner" role="alert"><div><strong>{stale ? 'Live collection paused. Showing the last successful result.' : 'Usage is unavailable right now.'}</strong><p>{query.error.message}</p></div><button className="button" onClick={() => void query.refetch()} disabled={!available || query.isFetching}>Retry collection</button></div>}
         {hasData && <section className={`coverage-banner ${incomplete ? 'incomplete' : ''}`} aria-label="Collection coverage" aria-live="polite">
           <strong>{incomplete ? `Collection incomplete: ${pendingSessions} ${pendingSessions === 1 ? 'session is' : 'sessions are'} pending ${creditPending ? 'usage records' : 'token counts'}.` : 'No pending sessions in this collection.'}{stale ? ' Last successful collection; current coverage is unknown.' : ''}</strong>
-          <p>{observedSessions} {observedSessions === 1 ? 'session has' : 'sessions have'} recorded counters. These counts describe the selected agents’ sources, not a percentage of tokens or coverage of this date range. Pending usage may fall outside or inside the selected period.</p>
+          <p>{observedSessions} {observedSessions === 1 ? 'session has' : 'sessions have'} recorded counters. These counts describe the selected agents’ sources, not a percentage of usage or coverage of this date range. Pending usage may fall outside or inside the selected period.</p>
           {incomplete && <p>Values below include only recorded observations. Pending sessions are not counted as zero and are checked again on collection.</p>}
         </section>}
-        {hasData && unavailableAgents.length > 0 && <section className="coverage-banner" aria-label="Unavailable token counts">
+        {!creditOnly && hasData && unavailableAgents.length > 0 && <section className="coverage-banner" aria-label="Unavailable token counts">
           <strong>Exact token counts are unavailable for {unavailableAgents.join(', ')}.</strong>
           <p>Token cards and the chart show only supported agents. This subtotal excludes those agents and is not a combined token total. Kiro reports credits separately; credits and context percentages are not converted into tokens.</p>
         </section>}
-        <section className="metric-grid" aria-label="Selected period observations" aria-busy={pending}>
+        {!creditOnly && <section className="metric-grid" aria-label="Selected period observations" aria-busy={pending}>
           {cards.map(card => <article key={card.name} className={`metric-card ${card.featured ? 'featured' : ''}`}><div className="metric-label">{card.name}<card.icon size={17} aria-hidden="true" /></div>
             <div className={`metric-value ${pending ? 'skeleton metric-skeleton' : ''}`} title={formatTokens(card.value)}>{pending ? <span className="sr-only">Loading {card.name}</span> : formatTokens(card.value, true)}</div><p>{card.note}</p>
           </article>)}
-        </section>
-        {coverage.some(item => item.provider === 'KIRO') && <section className="metric-grid" aria-label="Kiro credit observations"><article className="metric-card"><div className="metric-label">Observed Kiro credits</div><div className="metric-value" title={creditTotal ?? 'Unavailable'}>{formatCredits(creditTotal)}</div><p>Recorded credits · separate from tokens and currency</p></article></section>}
+        </section>}
+        {(creditOnly || coverage.some(item => item.provider === 'KIRO')) && <section className="metric-grid" aria-label="Kiro credit observations" aria-busy={pending}><article className={`metric-card ${creditOnly ? 'featured' : ''}`}><div className="metric-label">Observed Kiro credits</div><div className={`metric-value ${pending ? 'skeleton metric-skeleton' : ''}`} title={creditTotal ?? 'Unavailable'}>{pending ? <span className="sr-only">Loading recorded credits</span> : formatCredits(creditTotal)}</div><p>Recorded credits · separate from tokens and currency</p></article></section>}
         {hasData && !rows.length && <div className="empty-banner"><Database size={20} /><div><strong>{incomplete ? 'No observations available for this period yet' : 'No recorded usage in this period'}</strong><p>{incomplete ? 'Coverage is incomplete. Pending sessions may contain usage for this period.' : 'Try another date range. An empty result does not establish zero account-wide usage.'}</p></div></div>}
-        <UsageChart points={points} pending={pending} />
-        {hasData && rows.length > 0 && <UsageTable rows={rows} />}
-        <section id="about" className="data-note"><ShieldCheck size={20} aria-hidden="true" /><div><h2>A clear view, with honest limits.</h2><p>Usage reflects locally recorded events in the selected time zone, not a complete account-wide total. Pending sessions can make coverage incomplete. A dash means unavailable, not zero. Cached tokens are part of input usage. Cost estimates and remaining quota are not available yet.</p></div></section>
+        <QuotaPanel provider={agent || undefined} autoRefresh={autoRefresh} now={now} runtime={{ enabled: available, generation: desktop.state.generation, refreshInBackground: !!desktop.bridge }} />
+        {!creditOnly && (query.data?.modelUsage?.length ?? 0) > 0 && <ModelUsageTable rows={query.data!.modelUsage!} />}
+        {!creditOnly && <UsageChart points={points} pending={pending} />}
+        {hasData && rows.length > 0 && <UsageTable rows={rows} creditOnly={creditOnly} />}
+        <section id="about" className="data-note"><ShieldCheck size={20} aria-hidden="true" /><div><h2>A clear view, with honest limits.</h2><p>Usage reflects locally recorded events in the selected time zone, not a complete account-wide total. Pending sessions can make coverage incomplete. A dash means unavailable, not zero. {creditOnly ? 'Credits reflect recorded session consumption, not your remaining balance or a currency amount.' : 'Cached tokens are part of input usage. Cost estimates and remaining quota are not available yet.'}</p></div></section>
         <footer className="page-footer"><span>LLM Meter Personal <span className="footer-dot">·</span> Built for your own workflow</span><span>{query.dataUpdatedAt > 0 ? `Last successful collection ${new Date(query.dataUpdatedAt).toLocaleTimeString('en-US')}${stale ? ' · stale' : ''}` : 'No successful collection yet'}</span></footer>
       </div>
     </main>

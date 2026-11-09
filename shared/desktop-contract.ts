@@ -12,6 +12,7 @@ export type DesktopBridge = {
   getBackendState(): Promise<BackendState>
   onBackendState(listener: (state: BackendState) => void): () => void
   readDailyUsage(period: DesktopPeriod, requestId: string): Promise<DesktopResponse>
+  readQuota(provider: DesktopAgent | undefined, requestId: string): Promise<DesktopResponse>
   cancelUsage(requestId: string): void
   restartBackend(): Promise<void>
   chooseSessionsFolder(provider?: DesktopAgent): Promise<void>

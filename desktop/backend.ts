@@ -115,8 +115,16 @@ export class BackendManager {
   async readDaily(period: unknown, signal?: AbortSignal): Promise<DesktopResponse> {
     if (!validPeriod(period)) return { status: 400, body: null }
     if (!this.port || this.current.phase !== 'ready') return { status: 0, body: null }
+    return this.request('/api/usage/daily/collection', new URLSearchParams(period).toString(), signal)
+  }
+  async readQuota(provider: unknown, signal?: AbortSignal): Promise<DesktopResponse> {
+    if (provider !== undefined && !['CODEX', 'ANTIGRAVITY', 'KIRO'].includes(provider as string)) return { status: 400, body: null }
+    if (!this.port || this.current.phase !== 'ready') return { status: 0, body: null }
+    return this.request('/api/quota', new URLSearchParams(provider ? { provider: provider as string } : {}).toString(), signal)
+  }
+  private async request(path: '/api/usage/daily/collection' | '/api/quota', params: string, signal?: AbortSignal): Promise<DesktopResponse> {
     try {
-      const response = await fetch(`http://127.0.0.1:${this.port}/api/usage/daily/collection?${new URLSearchParams(period)}`, {
+      const response = await fetch(`http://127.0.0.1:${this.port}${path}?${params}`, {
         headers: { Accept: 'application/json', 'X-LLM-Meter-Token': this.token },
         signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(15_000), ...(signal ? [signal] : [])]),
         redirect: 'error',

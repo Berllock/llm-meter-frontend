@@ -27,7 +27,7 @@ beforeEach(async () => {
       if (req.headers['x-llm-meter-token'] !== process.env.LLM_METER_DESKTOP_TOKEN) { res.writeHead(401).end(); return }
       res.setHeader('Content-Type', 'application/json')
       if (mode === 'collection-error') { res.writeHead(503).end(); return }
-      if (!req.url.startsWith('/api/usage/daily/collection?')) { res.writeHead(404).end(); return }
+      if (!req.url.startsWith('/api/usage/daily/collection?') && !req.url.startsWith('/api/quota?')) { res.writeHead(404).end(); return }
       res.end('[]')
     })
     server.listen(0, '127.0.0.1', () => {
@@ -138,4 +138,14 @@ it('starts when at least one configured source is available', async () => {
   expect(manager.state.phase).toBe('ready')
   expect(children).toHaveLength(1)
   expect(launchArguments).toContain(`--llm-meter.antigravity.brain-directory=${join(directory, 'missing')}`)
+})
+
+// Validates quota uses the owned authenticated loopback service and rejects arbitrary provider/path input.
+it('collects scoped quota through a fixed route', async () => {
+  create(); await manager.start({ CODEX: directory })
+  expect(await manager.readQuota('CODEX')).toEqual({ status: 200, body: [] })
+  expect(await manager.readQuota(undefined)).toEqual({ status: 200, body: [] })
+  expect(await manager.readQuota('../private')).toEqual({ status: 400, body: null })
+  const ready = JSON.parse(await readFile(readyFile, 'utf8')) as { port: number }
+  expect((await fetch(`http://127.0.0.1:${ready.port}/api/quota`)).status).toBe(401)
 })

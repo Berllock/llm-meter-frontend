@@ -9,6 +9,7 @@ const bridge: DesktopBridge = {
     return () => { ipcRenderer.removeListener('meter:state-change', receive) }
   },
   readDailyUsage: (period: DesktopPeriod, requestId: string) => ipcRenderer.invoke('meter:daily', period, requestId),
+  readQuota: (provider, requestId) => ipcRenderer.invoke('meter:quota', provider, requestId),
   cancelUsage: requestId => ipcRenderer.send('meter:cancel', requestId),
   restartBackend: () => ipcRenderer.invoke('meter:restart'),
   chooseSessionsFolder: provider => ipcRenderer.invoke('meter:choose-source', provider ?? 'CODEX'),

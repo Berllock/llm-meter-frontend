@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
+// Keeps every browser scenario isolated from local provider sources.
+test.beforeEach(async ({ page }) => { await page.route('**/api/quota?*', route => route.fulfill({ json: [] })) })
+
 function envelope(params: URLSearchParams, usage: unknown[] = [], pendingSessions = 0) {
   return { from: params.get('from'), to: params.get('to'), zone: params.get('zone'), usage,
     status: pendingSessions ? 'PARTIAL' : 'COMPLETE', coverage: [{ provider: 'CODEX', observedSessions: usage.length ? 1 : 0, pendingSessions }] }
@@ -201,11 +204,77 @@ test('shows Kiro credits separately and labels the known token subtotal', async 
   await expect(page.getByRole('table')).toContainText('Credits')
   await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
   await expect(page.getByRole('table')).not.toContainText('CODEX')
-  await expect(tokens).not.toContainText('110')
-  await expect(tokens).toContainText('—')
+  await expect(tokens).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Chart metric' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Unavailable token counts' })).toHaveCount(0)
+  await expect(page.getByRole('columnheader')).toHaveText(['Date', 'Provider', 'Credits'])
+  await expect(page.getByRole('heading', { name: 'Daily credit records' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Kiro credit observations' })).toContainText('1.75')
   await page.getByLabel('Agent', { exact: true }).selectOption('CODEX')
   await expect(tokens).toContainText('Observed tokens')
   await expect(tokens).toContainText('110')
   await expect(page.getByRole('region', { name: 'Kiro credit observations' })).toHaveCount(0)
+})
+
+// Validates Kiro stays credit-only while loading, after collection failure, and with an empty successful result.
+test('keeps the Kiro layout credit-only across request states', async ({ page }) => {
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => { release = resolve })
+  let recovered = false
+  await page.route('**/api/usage/daily/collection?*', async route => {
+    const params = new URL(route.request().url()).searchParams
+    if (params.get('provider') !== 'KIRO') return route.fulfill({ json: envelope(params) })
+    await gate
+    if (!recovered) return route.fulfill({ status: 503 })
+    return route.fulfill({ json: { from: params.get('from'), to: params.get('to'), zone: params.get('zone'), status: 'COMPLETE', usage: [],
+      coverage: [{ provider: 'KIRO', observedSessions: 0, pendingSessions: 0, tokenCountsAvailable: false }] } })
+  })
+  try {
+    await page.goto('/')
+    await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
+    const credits = page.getByRole('region', { name: 'Kiro credit observations' })
+    await expect(credits).toHaveAttribute('aria-busy', 'true')
+    await expect(page.getByRole('region', { name: 'Selected period observations' })).toHaveCount(0)
+    await expect(page.getByRole('group', { name: 'Chart metric' })).toHaveCount(0)
+    release()
+    await expect(page.getByRole('alert')).toBeVisible()
+    await expect(credits).toContainText('—')
+    await expect(page.getByRole('region', { name: 'Selected period observations' })).toHaveCount(0)
+    recovered = true
+    await page.getByRole('button', { name: 'Retry collection' }).click()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByText('No recorded usage in this period')).toBeVisible()
+    await expect(credits).toContainText('—')
+    await expect(page.getByRole('group', { name: 'Chart metric' })).toHaveCount(0)
+    await expect(page.getByRole('table')).toHaveCount(0)
+  } finally { release() }
+})
+
+// Validates model partitions, quota reset/freshness, configured-plan mismatch and local selection persistence.
+test('shows model usage and honest plan quota observations', async ({ page }) => {
+  await page.route('**/api/usage/daily/collection?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    const row = { provider: 'CODEX', date: params.get('to'), zone: params.get('zone'), inputTokens: 100, outputTokens: 10, cachedTokens: 0 }
+    return route.fulfill({ json: { ...envelope(params, [row]), modelUsage: [{ ...row, model: 'model-synthetic' }] } })
+  })
+  const observedAt = new Date().toISOString()
+  const resetAt = new Date(Date.now() + 3600_000).toISOString()
+  await page.route('**/api/quota?*', route => route.fulfill({ json: [{ provider: 'CODEX', status: 'OBSERVED', snapshot: {
+    observedAt, collectedAt: observedAt, planType: 'plus', windows: [{ name: 'primary', usedPercent: 85, windowMinutes: 300, resetAt, observedAt, limitId: 'codex' }],
+  } }] }))
+  await page.goto('/')
+  await expect(page.getByRole('region', { name: 'Codex model observations' })).toContainText('model-synthetic')
+  const quota = page.getByRole('region', { name: 'Plan quota observations' })
+  await expect(quota).toContainText('85% last reported used · 15% last reported remaining')
+  await expect(quota).toContainText('Reported usage is close to this limit.')
+  await page.getByLabel('Configured Codex plan').selectOption('pro')
+  await expect(quota).toContainText('Selected plan differs from the recorded plan')
+  await expect(quota).toContainText('Reported plan: plus')
+  await page.reload()
+  await expect(page.getByLabel('Configured Codex plan')).toHaveValue('pro')
+  await page.route('**/api/quota?*', route => route.fulfill({ status: 503 }))
+  await page.getByRole('button', { name: 'Refresh quota' }).click()
+  await expect(quota).toContainText('current quota is unknown')
+  await expect(quota.getByText('Reported usage is close to this limit.')).toHaveCount(0)
+  await expect(page.getByRole('status')).toHaveText('API connected')
 })

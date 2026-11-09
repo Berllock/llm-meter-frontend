@@ -19,3 +19,12 @@
 
 .agent-filter { margin-bottom: 14px; max-width: 280px; }
 .agent-filter select { min-height: 40px; padding: 8px 12px; border: 1px solid #dce2e9; border-radius: 8px; background: white; color: inherit; font: inherit; width: 100%; }
+
+.quota-panel { margin: 24px 0; }
+.quota-note, .quota-plan { display: block; margin: 12px 22px; font-size: 12px; line-height: 1.7; color: var(--muted, #68777e); }
+.quota-plan select { margin-left: 10px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--ink); }
+.quota-provider { padding: 16px 22px; border-top: 1px solid var(--border); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.quota-provider h3 { margin: 0 0 8px; }
+.quota-window { padding: 12px 0; }
+.quota-window progress { display: block; width: 100%; accent-color: #758e48; margin: 8px 0; }
+.quota-mismatch { font-weight: 600; color: #805314; }
