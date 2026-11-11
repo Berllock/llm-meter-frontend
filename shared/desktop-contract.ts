@@ -3,6 +3,8 @@ export type BackendState = {
   message: string
   revision: number
   generation: string
+  antigravityIdeQuotaEnabled?: boolean
+  antigravityIdeSharedAccount?: boolean
 }
 export type DesktopAgent = 'CODEX' | 'ANTIGRAVITY' | 'KIRO'
 export type AgentSources = Partial<Record<DesktopAgent, string>>
@@ -14,6 +16,8 @@ export type DesktopBridge = {
   readDailyUsage(period: DesktopPeriod, requestId: string): Promise<DesktopResponse>
   readQuota(provider: DesktopAgent | undefined, requestId: string): Promise<DesktopResponse>
   cancelUsage(requestId: string): void
+  setAntigravityIdeQuotaEnabled(enabled: boolean): Promise<void>
+  setAntigravityIdeSharedAccount(enabled: boolean): Promise<void>
   restartBackend(): Promise<void>
   chooseSessionsFolder(provider?: DesktopAgent): Promise<void>
 }

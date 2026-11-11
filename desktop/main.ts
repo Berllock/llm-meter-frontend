@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { BackendManager } from './backend.js'
 import { resolveBackendRuntime } from './runtime.js'
 import type { AgentSources, DesktopAgent } from '../shared/desktop-contract.js'
-import { readSources, saveSource } from './settings.js'
+import { readSources, saveSource, readIdeQuotaEnabled, saveIdeQuotaEnabled, readIdeSharedAccount, saveIdeSharedAccount } from './settings.js'
 
 app.setName('LLM Meter Personal')
 if (process.env.LLM_METER_USER_DATA_DIR) {
@@ -16,6 +16,8 @@ if (process.env.LLM_METER_USER_DATA_DIR) {
 let window: BrowserWindow | null = null
 let backend: BackendManager
 let sources: AgentSources = {}
+let ideQuotaEnabled = false
+let ideSharedAccount = false
 let quitting = false
 let operation = Promise.resolve()
 const requests = new Map<string, AbortController>()
@@ -31,7 +33,7 @@ function serialize(action: () => Promise<void>) {
   })
   return operation
 }
-async function restart() { await backend.stop(); if (!quitting) await backend.start(sources) }
+async function restart() { await backend.stop(); if (!quitting) await backend.start(sources, ideQuotaEnabled, ideSharedAccount) }
 async function chooseSource(provider: DesktopAgent = 'CODEX') {
   if (!window) return
   const result = await dialog.showOpenDialog(window, { title: { CODEX: 'Choose Codex sessions folder', ANTIGRAVITY: 'Choose Antigravity brain folder', KIRO: 'Choose Kiro CLI sessions folder' }[provider], properties: ['openDirectory'] })
@@ -43,6 +45,24 @@ async function chooseSource(provider: DesktopAgent = 'CODEX') {
 function registerBridge() {
   ipcMain.handle('meter:state', event => { requireTrusted(event); return backend.state })
   ipcMain.handle('meter:restart', event => { requireTrusted(event); return serialize(restart) })
+  ipcMain.handle('meter:antigravity-ide-shared-account', (event, enabled: unknown) => {
+    requireTrusted(event)
+    if (typeof enabled !== 'boolean') throw new Error('Invalid quota setting')
+    return serialize(async () => {
+      await saveIdeSharedAccount(app.getPath('userData'), enabled)
+      ideSharedAccount = enabled
+      await restart()
+    })
+  })
+  ipcMain.handle('meter:antigravity-ide-quota', (event, enabled: unknown) => {
+    requireTrusted(event)
+    if (typeof enabled !== 'boolean') throw new Error('Invalid quota setting')
+    return serialize(async () => {
+      await saveIdeQuotaEnabled(app.getPath('userData'), enabled)
+      ideQuotaEnabled = enabled
+      await restart()
+    })
+  })
   ipcMain.handle('meter:choose-source', (event, provider: unknown = 'CODEX') => {
     requireTrusted(event)
     if (provider !== 'CODEX' && provider !== 'ANTIGRAVITY' && provider !== 'KIRO') throw new Error('Invalid agent')
@@ -80,9 +100,10 @@ if (!app.requestSingleInstanceLock()) app.quit()
 else {
   app.on('second-instance', () => { if (window?.isMinimized()) window.restore(); window?.show(); window?.focus() })
   app.whenReady().then(async () => {
-    backend = new BackendManager(await resolveBackendRuntime({
+    const ideHubPid = !app.isPackaged ? process.env.LLM_METER_ANTIGRAVITY_IDE_HUB_PID : undefined
+    backend = new BackendManager({ ...await resolveBackendRuntime({
       packaged: app.isPackaged, appRoot: app.getAppPath(), resourcesPath: process.resourcesPath,
-    }))
+    }), ...(ideHubPid ? { ideHubPid: Number(ideHubPid) } : {}) })
     registerBridge()
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { label: 'File', submenu: [
@@ -95,6 +116,8 @@ else {
     ]))
     createWindow()
     sources = await readSources(app.getPath('userData'))
+    ideQuotaEnabled = await readIdeQuotaEnabled(app.getPath('userData'))
+    ideSharedAccount = await readIdeSharedAccount(app.getPath('userData'))
     const defaults: AgentSources = { CODEX: join(homedir(), '.codex', 'sessions'), ANTIGRAVITY: join(homedir(), '.gemini', 'antigravity', 'brain'), KIRO: join(homedir(), '.kiro', 'sessions') }
     const environmentKeys = { CODEX: 'LLM_METER_SESSIONS_DIRECTORY', ANTIGRAVITY: 'LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY', KIRO: 'LLM_METER_KIRO_SESSIONS_DIRECTORY' }
     for (const provider of ['CODEX', 'ANTIGRAVITY', 'KIRO'] as const) {
@@ -102,7 +125,7 @@ else {
       if (override) sources[provider] = override
       else if (!sources[provider] && defaults[provider] && existsSync(defaults[provider])) sources[provider] = defaults[provider]
     }
-    if (!quitting) await serialize(() => backend.start(sources))
+    if (!quitting) await serialize(() => backend.start(sources, ideQuotaEnabled, ideSharedAccount))
   }).catch(() => { dialog.showErrorBox('LLM Meter', 'The desktop application could not be initialized.'); app.quit() })
   app.on('window-all-closed', () => app.quit())
   app.on('before-quit', event => {

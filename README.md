@@ -238,3 +238,11 @@ An independent `/api/quota` query displays Codex's latest recorded plan windows:
 Configure the Codex plan as reported, Plus or Pro. This choice persists locally and flags disagreement with the recorded plan. It does not simulate upgrade capacity. Recent-pace forecasting now uses comparable Codex source observations, with sampled evidence, fastest/slowest interval scenarios and explicit insufficient/stale outcomes. Other-plan capacity comparisons and token pricing remain later work requiring verified comparable evidence.
 
 Desktop quota calls use the restricted preload bridge and owned authenticated Java service. `npm run desktop` rebuilds the backend and interface for development. Restart an already running backend/frontend after updating the code.
+
+## Antigravity IDE quota
+
+With the Antigravity VS Code extension running, enable **Read Antigravity IDE quota** in the desktop toolbar. The choice persists in LLM Meter settings and restarts its local service. It is off by default and does not change IDE/global configuration. The Agent filter scopes the existing token view and quota query independently.
+
+The panel shows supported percentage buckets, reset, model/bucket labels and query time. Unknown duration and omitted unsupported units remain explicit. Queries are limited to one attempt per minute; provider-side updates may lag. No plan label, token allowance, cost or Antigravity forecast is inferred. For multiple IDE windows using one account, enable **IDE windows share one account**. Otherwise keep one hub active or use an explicit development process selector. The policy chooses one connection and never adds percentages together.
+
+This Linux integration is verified against the Google Antigravity VS Code extension 1.11.0 local hub protocol; future updates may require adaptation. See backend `docs/antigravity-integration.md` for bounds, configuration, architecture and test isolation.

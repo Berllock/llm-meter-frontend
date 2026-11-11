@@ -10,6 +10,7 @@ import type { Agent, UsagePeriod } from '../model/usage'
 import { UsageChart } from './UsageChart'
 import { UsageFilters } from './UsageFilters'
 import { QuotaPanel } from '../../quota/components/QuotaPanel'
+import { IdeQuotaToggle } from '../../quota/components/IdeQuotaToggle'
 import { ModelUsageTable } from './ModelUsageTable'
 import { UsageTable } from './UsageTable'
 
@@ -77,6 +78,10 @@ export function UsageDashboard() {
           <button className="button" onClick={() => void desktop.bridge?.chooseSessionsFolder()} disabled={desktop.state.phase === 'starting'}>Choose sessions folder</button>
           <button className="button" onClick={() => void desktop.bridge?.chooseSessionsFolder('ANTIGRAVITY')} disabled={desktop.state.phase === 'starting'}>Choose Antigravity brain folder</button>
           <button className="button" onClick={() => void desktop.bridge?.chooseSessionsFolder('KIRO')} disabled={desktop.state.phase === 'starting'}>Choose Kiro CLI sessions folder</button>
+          <IdeQuotaToggle enabled={!!desktop.state.antigravityIdeQuotaEnabled} busy={desktop.state.phase === 'starting'}
+            onChange={async enabled => { await desktop.bridge?.setAntigravityIdeQuotaEnabled(enabled) }} />
+          {desktop.state.antigravityIdeQuotaEnabled && <IdeQuotaToggle label="IDE windows share one account" enabled={!!desktop.state.antigravityIdeSharedAccount} busy={desktop.state.phase === 'starting'}
+            onChange={async enabled => { await desktop.bridge?.setAntigravityIdeSharedAccount(enabled) }} />}
           <button className="button" onClick={() => void desktop.bridge?.restartBackend()} disabled={desktop.state.phase === 'starting'}>Restart service</button>
         </div></div>}
         <div className="agent-filter"><label className="field"><span>Agent</span><select aria-label="Agent" value={agent} onChange={event => setAgent(event.target.value as Agent | '')}><option value="">All configured agents</option><option value="CODEX">Codex</option><option value="ANTIGRAVITY">Antigravity</option><option value="KIRO">Kiro</option></select></label></div>

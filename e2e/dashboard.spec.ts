@@ -305,3 +305,26 @@ test('shows recent-pace forecasts and invalidates stale projections', async ({ p
   await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
   await expect(quota.getByText(/Projected exhaustion:/)).toHaveCount(0)
 })
+
+// Validates IDE quota labels, unknown duration/excluded units and stale failure behavior without manufacturing a Codex forecast.
+test('shows Antigravity IDE quota as queried evidence', async ({ page }) => {
+  await page.route('**/api/usage/daily/collection?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    return route.fulfill({ json: { from: params.get('from'), to: params.get('to'), zone: params.get('zone'), status: 'COMPLETE', usage: [], coverage: [{ provider: 'ANTIGRAVITY', observedSessions: 0, pendingSessions: 0 }] } })
+  })
+  const observedAt = new Date().toISOString()
+  await page.route('**/api/quota?*', route => route.fulfill({ json: [{ provider: 'ANTIGRAVITY', status: 'OBSERVED', snapshot: { observedAt, collectedAt: observedAt,
+    source: 'ANTIGRAVITY_IDE', planType: null, excludedWindows: 1, windows: [{ name: 'custom', usedPercent: 85, windowMinutes: null, resetAt: new Date(Date.now() + 3600_000).toISOString(), observedAt, limitId: 'synthetic-model', displayName: 'Synthetic model' }] } }] }))
+  await page.goto('/')
+  const quota = page.getByRole('region', { name: 'Plan quota observations' })
+  await expect(quota).toContainText('Synthetic model')
+  await expect(quota).toContainText('Duration not reported')
+  await expect(quota).toContainText('Queried')
+  await expect(quota).toContainText('1 quota buckets omitted')
+  await expect(quota).toContainText('85% last reported used')
+  await expect(quota.getByText(/Projected exhaustion:/)).toHaveCount(0)
+  await page.route('**/api/quota?*', route => route.fulfill({ status: 503 }))
+  await page.getByRole('button', { name: 'Refresh quota' }).click()
+  await expect(quota).toContainText('current quota is unknown')
+  await expect(quota.getByText('Reported usage is close to this limit.')).toHaveCount(0)
+})

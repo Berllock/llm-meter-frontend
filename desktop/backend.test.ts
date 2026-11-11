@@ -149,3 +149,17 @@ it('collects scoped quota through a fixed route', async () => {
   const ready = JSON.parse(await readFile(readyFile, 'utf8')) as { port: number }
   expect((await fetch(`http://127.0.0.1:${ready.port}/api/quota`)).status).toBe(401)
 })
+
+// Validates synthetic/default starts never inspect the real IDE, while explicit opt-in becomes a fixed boolean backend flag.
+it('isolates IDE quota discovery behind explicit opt-in', async () => {
+  create(); await manager.start({ ANTIGRAVITY: directory })
+  expect(launchArguments).toContain('--llm-meter.antigravity.ide-quota-enabled=false')
+  expect(launchArguments).toContain('--llm-meter.antigravity.ide-shared-account=false')
+  expect(manager.state.antigravityIdeQuotaEnabled).toBeUndefined()
+  await manager.stop()
+  await manager.start({ ANTIGRAVITY: directory }, true, true)
+  expect(launchArguments).toContain('--llm-meter.antigravity.ide-quota-enabled=true')
+  expect(manager.state.antigravityIdeQuotaEnabled).toBe(true)
+  expect(manager.state.antigravityIdeSharedAccount).toBe(true)
+  expect(launchArguments).toContain('--llm-meter.antigravity.ide-shared-account=true')
+})

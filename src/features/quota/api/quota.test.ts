@@ -40,3 +40,21 @@ it('maps quota collection failure to a safe error', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('PRIVATE_CONTENT', { status: 503 })))
   await expect(fetchQuota()).rejects.toThrow('Quota could not be collected. Usage observations remain independent.')
 })
+
+// Validates IDE bucket names, unknown duration, query provenance and exclusions without accepting a fabricated forecast.
+it('preserves supported Antigravity IDE quota metadata', () => {
+  const quota = { ...row, provider: 'ANTIGRAVITY', snapshot: { ...row.snapshot, planType: null, source: 'ANTIGRAVITY_IDE', excludedWindows: 1,
+    windows: [{ ...window, name: 'weekly', windowMinutes: null, displayName: 'Synthetic model' }] } }
+  const result = parseQuota([quota], 'ANTIGRAVITY')[0].snapshot!
+  expect(result.source).toBe('ANTIGRAVITY_IDE')
+  expect(result.windows[0].windowMinutes).toBeNull()
+  expect(result.excludedWindows).toBe(1)
+  expect(() => parseQuota([{ ...quota, provider: 'CODEX' }])).toThrow()
+  expect(() => parseQuota([{ ...quota, snapshot: { ...quota.snapshot, windows: [{ ...quota.snapshot.windows[0], forecast: {} }] } }])).toThrow()
+})
+// Validates nullable duration is restricted to the explicit IDE source and unsafe display labels/exclusion counts fail.
+it('rejects contradictory IDE window metadata', () => {
+  expect(() => parseQuota([{ ...row, snapshot: { ...row.snapshot, windows: [{ ...window, windowMinutes: null }] } }])).toThrow()
+  expect(() => parseQuota([{ ...row, snapshot: { ...row.snapshot, excludedWindows: -1 } }])).toThrow()
+  expect(() => parseQuota([{ ...row, snapshot: { ...row.snapshot, windows: [{ ...window, displayName: 'bad\u0000label' }] } }])).toThrow()
+})

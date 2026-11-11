@@ -3,7 +3,7 @@ import { expect, it } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readSource, readSources, saveSource } from './settings'
+import { readSource, readSources, saveSource, readIdeQuotaEnabled, saveIdeQuotaEnabled, readIdeSharedAccount, saveIdeSharedAccount } from './settings'
 // Validates that only the selected folder is persisted, without usage data or request tokens.
 it('persists a selected absolute source folder', async () => {
   const root = await mkdtemp(join(tmpdir(), 'meter-settings-'))
@@ -45,5 +45,38 @@ it('persists Kiro alongside the other agents', async () => {
     await saveSource(root, join(root, 'brain'), 'ANTIGRAVITY')
     await saveSource(root, join(root, 'kiro'), 'KIRO')
     expect(await readSources(root)).toEqual({ CODEX: join(root, 'codex'), ANTIGRAVITY: join(root, 'brain'), KIRO: join(root, 'kiro') })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// Validates opt-in is false by default and survives source changes without persisting any IDE connection credentials.
+it('persists IDE quota opt-in independently from source folders', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'meter-ide-settings-'))
+  try {
+    expect(await readIdeQuotaEnabled(root)).toBe(false)
+    await saveSource(root, root, 'ANTIGRAVITY')
+    await saveIdeQuotaEnabled(root, true)
+    await saveSource(root, join(root, 'codex'), 'CODEX')
+    expect(await readIdeQuotaEnabled(root)).toBe(true)
+    expect(await readSources(root)).toEqual({ ANTIGRAVITY: root, CODEX: join(root, 'codex') })
+    expect(JSON.parse(await readFile(join(root, 'settings.json'), 'utf8'))).toEqual({ sources: { ANTIGRAVITY: root, CODEX: join(root, 'codex') }, antigravityIdeQuotaEnabled: true })
+    await saveIdeQuotaEnabled(root, false)
+    expect(await readIdeQuotaEnabled(root)).toBe(false)
+    expect(await readSources(root)).toEqual({ ANTIGRAVITY: root, CODEX: join(root, 'codex') })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// Validates shared-account consent is opt-in, persists independently and is preserved across quota/source settings changes.
+it('preserves the explicit shared-account policy', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'meter-ide-shared-'))
+  try {
+    expect(await readIdeSharedAccount(root)).toBe(false)
+    await saveIdeSharedAccount(root, true)
+    await saveIdeQuotaEnabled(root, true)
+    await saveSource(root, root, 'ANTIGRAVITY')
+    expect(await readIdeSharedAccount(root)).toBe(true)
+    expect(await readIdeQuotaEnabled(root)).toBe(true)
+    await saveIdeSharedAccount(root, false)
+    expect(await readIdeSharedAccount(root)).toBe(false)
+    expect(await readIdeQuotaEnabled(root)).toBe(true)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

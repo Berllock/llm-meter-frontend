@@ -11,6 +11,8 @@ const bridge: DesktopBridge = {
   readDailyUsage: (period: DesktopPeriod, requestId: string) => ipcRenderer.invoke('meter:daily', period, requestId),
   readQuota: (provider, requestId) => ipcRenderer.invoke('meter:quota', provider, requestId),
   cancelUsage: requestId => ipcRenderer.send('meter:cancel', requestId),
+  setAntigravityIdeSharedAccount: enabled => ipcRenderer.invoke('meter:antigravity-ide-shared-account', enabled),
+  setAntigravityIdeQuotaEnabled: enabled => ipcRenderer.invoke('meter:antigravity-ide-quota', enabled),
   restartBackend: () => ipcRenderer.invoke('meter:restart'),
   chooseSessionsFolder: provider => ipcRenderer.invoke('meter:choose-source', provider ?? 'CODEX'),
 }

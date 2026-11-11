@@ -1,9 +1,11 @@
 import { _electron as electron, expect } from '@playwright/test'
-import { mkdtemp, mkdir, copyFile, appendFile, writeFile, rm, readFile, readdir } from 'node:fs/promises'
+import { mkdtemp, mkdir, copyFile, appendFile, writeFile, rm, readFile, readdir, chmod } from 'node:fs/promises'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { createServer } from 'node:net'
 const project = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const root = await mkdtemp(join(tmpdir(), 'meter-electron-test-'))
 const sessions = join(root, 'sessions')
@@ -22,6 +24,7 @@ const environment = { ...process.env, LLM_METER_USER_DATA_DIR: settings, LLM_MET
 if (packaged) Object.assign(environment, { PATH: '/nonexistent-build-tools', JAVA_HOME: '/nonexistent-jdk', LLM_METER_JAVA: '/nonexistent-java', JAVA_TOOL_OPTIONS: '--invalid-host-java-option', _JAVA_OPTIONS: '--invalid-host-java-option', JDK_JAVA_OPTIONS: '--invalid-host-java-option' })
 const launch = () => electron.launch({ ...(packaged ? { executablePath, args: [] } : { args: [project] }), env: environment, timeout: 30_000 })
 let application
+let ideHub
 async function ownedJavaProcesses() {
   if (process.platform !== 'linux') return []
   const entries = (await readdir('/proc')).filter(entry => /^\d+$/.test(entry))
@@ -32,10 +35,35 @@ async function ownedJavaProcesses() {
   return matches.filter(pid => pid !== null)
 }
 try {
+  if (!packaged) {
+    // Isolate IDE discovery to a fake same-user agy process; never connect to an existing real IDE hub.
+    const executable = join(root, 'agy')
+    await copyFile(process.execPath, executable)
+    await chmod(executable, 0o700)
+    const reservation = createServer()
+    await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
+    const hubPort = reservation.address().port
+    await new Promise(resolve => reservation.close(resolve))
+    await writeFile(join(root, 'fake-ide.cjs'), `
+      const http = require('node:http'), fs = require('node:fs'), path = require('node:path')
+      const root = path.dirname(__filename)
+      const arg = name => process.argv.find(value => value.startsWith(name + '='))?.split('=').slice(1).join('=')
+      const server = http.createServer((req, res) => {
+        if (req.method !== 'POST' || req.url !== '/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary' || req.headers['x-codeium-csrf-token'] !== 'SYNTHETIC_IDE_TEST_TOKEN') { res.writeHead(403).end(); return }
+        fs.appendFileSync(path.join(root, 'ide-calls'), 'query\\n')
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify({ response: { groups: [{ buckets: [{ bucketId: 'synthetic-model', displayName: 'Synthetic IDE model', window: 'weekly', remainingFraction: 0.6, resetTime: new Date(Date.now() + 7200000).toISOString() }] }] } }))
+      })
+      server.listen(Number(arg('--hub-port')), '127.0.0.1', () => fs.writeFileSync(path.join(root, 'ide-ready'), 'ready'))
+    `)
+    ideHub = spawn(executable, [join(root, 'fake-ide.cjs'), '--hub', '--app_data_dir=antigravity', `--hub-port=${hubPort}`, '--csrf_token=SYNTHETIC_IDE_TEST_TOKEN'], { stdio: 'ignore' })
+    await expect.poll(async () => readFile(join(root, 'ide-ready'), 'utf8').catch(() => ''), { timeout: 10_000 }).toBe('ready')
+    environment.LLM_METER_ANTIGRAVITY_IDE_HUB_PID = String(ideHub.pid)
+  }
   // Validates real Java startup, isolated renderer access, observed data, restart, and owned-process cleanup.
   application = await launch()
   assert.equal(await application.evaluate(({ app }) => app.isPackaged), packaged)
-  const page = await application.firstWindow()
+  let page = await application.firstWindow()
   await expect.poll(async () => (await page.evaluate(() => window.llmMeter.getBackendState())).phase, { timeout: 60_000 }).toBe('ready')
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined')
   assert.equal(await page.evaluate(() => typeof window.process), 'undefined')
@@ -176,6 +204,46 @@ try {
   assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.status, 'ESTIMATED')
   assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.sampleCount, 3)
   assert.equal(JSON.stringify(forecastResult.body).includes('synthetic-account'), false)
+  if (!packaged) {
+    // Exercise the actual opt-in, Java process discovery, fixed RPC, reader, quota IPC and dashboard using only the fake IDE.
+    await page.getByLabel('Read Antigravity IDE quota').check()
+    await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.antigravityIdeQuotaEnabled === true }, { timeout: 60_000 }).toBe(true)
+    let idePanel = page.getByRole('region', { name: 'Plan quota observations' })
+    await expect(idePanel).toContainText('Synthetic IDE model', { timeout: 15_000 })
+    await expect(idePanel).toContainText('40% last reported used')
+    const ideResult = await page.evaluate(() => window.llmMeter.readQuota('ANTIGRAVITY', crypto.randomUUID()))
+    assert.equal(ideResult.status, 200)
+    assert.equal(ideResult.body[0].snapshot.source, 'ANTIGRAVITY_IDE')
+    assert.equal(ideResult.body[0].snapshot.planType, null)
+    assert.equal(ideResult.body[0].snapshot.windows[0].forecast, undefined)
+    assert.equal(JSON.stringify(ideResult.body).includes('SYNTHETIC_IDE_TEST_TOKEN'), false)
+    await page.getByRole('button', { name: 'Refresh quota' }).click()
+    assert.equal((await readFile(join(root, 'ide-calls'), 'utf8')).trim().split('\n').length, 1)
+    assert.equal(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')).antigravityIdeQuotaEnabled, true)
+    await page.getByLabel('IDE windows share one account').check()
+    await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.antigravityIdeSharedAccount === true }, { timeout: 60_000 }).toBe(true)
+    assert.equal(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')).antigravityIdeSharedAccount, true)
+    await page.getByRole('button', { name: 'Restart service' }).click()
+    await expect(page.getByLabel('Read Antigravity IDE quota')).toBeEnabled({ timeout: 60_000 })
+    await expect(page.getByLabel('Read Antigravity IDE quota')).toBeChecked()
+    await expect(idePanel).toContainText('Synthetic IDE model', { timeout: 15_000 })
+    // Validate the opt-in survives full relaunch and the external synthetic IDE remains independently owned.
+    await application.close(); application = undefined
+    await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
+    assert.equal(ideHub.exitCode, null)
+    application = await launch(); page = await application.firstWindow()
+    await expect.poll(async () => (await page.evaluate(() => window.llmMeter.getBackendState())).phase, { timeout: 60_000 }).toBe('ready')
+    await expect(page.getByLabel('Read Antigravity IDE quota')).toBeChecked()
+    idePanel = page.getByRole('region', { name: 'Plan quota observations' })
+    await expect(idePanel).toContainText('Synthetic IDE model', { timeout: 15_000 })
+    await expect(page.getByLabel('IDE windows share one account')).toBeChecked()
+    await page.getByLabel('IDE windows share one account').uncheck()
+    await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && !next.antigravityIdeSharedAccount }, { timeout: 60_000 }).toBe(true)
+    await page.getByLabel('Read Antigravity IDE quota').uncheck()
+    await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && !next.antigravityIdeQuotaEnabled }, { timeout: 60_000 }).toBe(true)
+    await expect(idePanel.getByText('Synthetic IDE model')).toHaveCount(0)
+    assert.equal(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')).antigravityIdeQuotaEnabled, undefined)
+  }
   // Validates the third native source chooser saves Kiro without replacing the other configured agents.
   const beforeKiroSelection = await page.evaluate(() => window.llmMeter.getBackendState())
   await application.evaluate(({ dialog }, selected) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] }) }, kiro)
@@ -218,5 +286,9 @@ try {
   console.log('Desktop integration passed: three agents, recorded Kiro credits, normalized token subtotals, provider/date/metric filters, background updates, safe failure isolation, per-agent settings, relaunch, and owned Java cleanup.')
 } finally {
   if (application) await application.close()
+  if (ideHub && ideHub.exitCode === null && ideHub.signalCode === null) {
+    const exited = new Promise(resolve => ideHub.once('exit', resolve))
+    ideHub.kill('SIGTERM'); await exited
+  }
   await rm(root, { recursive: true, force: true })
 }

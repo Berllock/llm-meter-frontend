@@ -22,23 +22,27 @@ export function parseQuota(value: unknown, provider?: Agent): ProviderQuota[] {
     if (!row.snapshot || typeof row.snapshot !== 'object') throw invalid()
     const snapshot = row.snapshot as Record<string, unknown>
     if (!time(snapshot.observedAt) || !time(snapshot.collectedAt) || !label(snapshot.planType) || !Array.isArray(snapshot.windows) || !snapshot.windows.length) throw invalid()
+    const ide = row.provider === 'ANTIGRAVITY' && snapshot.source === 'ANTIGRAVITY_IDE'
+    if (snapshot.source !== undefined && !ide) throw invalid()
+    if (snapshot.excludedWindows !== undefined && (typeof snapshot.excludedWindows !== 'number' || !Number.isSafeInteger(snapshot.excludedWindows) || snapshot.excludedWindows < 0 || snapshot.excludedWindows > 512)) throw invalid()
     const windowsSeen = new Set<string>()
     const windows: QuotaWindow[] = snapshot.windows.map((item: unknown) => {
       if (!item || typeof item !== 'object') throw invalid()
       const w = item as Record<string, unknown>
-      if (!['primary', 'secondary'].includes(w.name as string) || typeof w.usedPercent !== 'number' || !Number.isFinite(w.usedPercent)
-        || w.usedPercent < 0 || w.usedPercent > 100 || typeof w.windowMinutes !== 'number' || !Number.isSafeInteger(w.windowMinutes)
-        || w.windowMinutes < 1 || !time(w.resetAt) || !time(w.observedAt) || !label(w.limitId)) throw invalid()
+      if ((ide ? typeof w.name !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(w.name) : !['primary', 'secondary'].includes(w.name as string)) || typeof w.usedPercent !== 'number' || !Number.isFinite(w.usedPercent)
+        || w.usedPercent < 0 || w.usedPercent > 100 || (!(ide && w.windowMinutes === null) && (typeof w.windowMinutes !== 'number' || !Number.isSafeInteger(w.windowMinutes) || w.windowMinutes < 1)) || !time(w.resetAt) || !time(w.observedAt) || !label(w.limitId)) throw invalid()
+      if (w.displayName !== undefined && (typeof w.displayName !== 'string' || !w.displayName.trim() || w.displayName.length > 200 || Array.from(w.displayName).some(character => { const code = character.charCodeAt(0); return code < 32 || (code >= 127 && code <= 159) }))) throw invalid()
+      if (ide && (w.forecast !== undefined && w.forecast !== null)) throw invalid()
       const key = JSON.stringify([w.limitId, w.name])
       if (windowsSeen.has(key)) throw invalid()
       windowsSeen.add(key)
-      const window = { name: w.name as string, usedPercent: w.usedPercent, windowMinutes: w.windowMinutes, resetAt: w.resetAt,
-        observedAt: w.observedAt, limitId: w.limitId }
+      const window = { name: w.name as string, usedPercent: w.usedPercent, windowMinutes: w.windowMinutes as number | null, resetAt: w.resetAt,
+        observedAt: w.observedAt, limitId: w.limitId, ...(typeof w.displayName === 'string' ? { displayName: w.displayName } : {}) }
       const forecast = parseForecast(w.forecast, window)
       return { ...window, ...(forecast ? { forecast } : {}) }
     })
     return { provider: row.provider as Agent, status: 'OBSERVED', snapshot: { observedAt: snapshot.observedAt, collectedAt: snapshot.collectedAt,
-      planType: snapshot.planType, windows } }
+      planType: snapshot.planType, windows, ...(ide ? { source: 'ANTIGRAVITY_IDE' as const } : {}), ...(snapshot.excludedWindows !== undefined ? { excludedWindows: snapshot.excludedWindows as number } : {}) } }
   })
 }
 

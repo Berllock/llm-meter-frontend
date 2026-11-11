@@ -17,7 +17,7 @@ export function parseForecast(value: unknown, window: QuotaWindow): QuotaForecas
   if (!predicted) {
     if (f.percentagePointsPerHour !== null || f.projectedExhaustionAt !== null || f.earliestExhaustionAt !== null || f.latestExhaustionAt !== null) throw invalid()
   } else {
-    if (typeof f.percentagePointsPerHour !== 'number' || !Number.isFinite(f.percentagePointsPerHour) || f.percentagePointsPerHour <= 0
+    if (window.windowMinutes === null || typeof f.percentagePointsPerHour !== 'number' || !Number.isFinite(f.percentagePointsPerHour) || f.percentagePointsPerHour <= 0
       || f.sampleCount < 3 || typeof f.sampleFrom !== 'string' || typeof f.sampleTo !== 'string' || window.usedPercent >= 100) throw invalid()
     const from = Date.parse(f.sampleFrom), to = Date.parse(f.sampleTo), reset = Date.parse(window.resetAt)
     if (to - from < 120_000 || to - from > 1_800_000 || to >= reset || from < reset - window.windowMinutes * 60_000) throw invalid()

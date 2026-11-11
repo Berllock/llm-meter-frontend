@@ -13,7 +13,7 @@ const javaInfo = await new Promise((resolve, reject) => {
     resolve({ javaCommand: join(home, 'bin', 'java') })
   })
 })
-const child = spawn('mvn', ['-DskipTests', 'package'], { cwd: backend, stdio: 'inherit', shell: false })
+const child = spawn('mvn', ['-DskipTests', 'package'], { cwd: backend, env: { ...process.env, JAVA_HOME: dirname(dirname(javaInfo.javaCommand)) }, stdio: 'inherit', shell: false })
 await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error('Backend build failed'))) })
 const target = join(backend, 'target')
 const jars = await Promise.all((await readdir(target)).filter(name => /^llm-meter-personal-.*\.jar$/.test(name) && !/-(sources|javadoc)\.jar$/.test(name)).map(async name => ({ name, time: (await stat(join(target, name))).mtimeMs })))

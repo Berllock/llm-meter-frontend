@@ -7,6 +7,7 @@ import type { AgentSources, BackendState, DesktopPeriod, DesktopResponse } from 
 
 type Options = {
   jarPath: string
+  ideHubPid?: number
   javaCommand?: string
   bundledJava?: boolean
   startupTimeout?: number
@@ -30,6 +31,8 @@ export class BackendManager {
   private token = ''
   private port?: number
   private epoch = 0
+  private ideQuotaEnabled = false
+  private ideSharedAccount = false
   private starting?: Promise<void>
   private lifetime = new AbortController()
   private listeners = new Set<(state: BackendState) => void>()
@@ -38,12 +41,14 @@ export class BackendManager {
   get state(): BackendState { return { ...this.current } }
   subscribe(listener: (state: BackendState) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   private update(phase: BackendState['phase'], message: string, generation = this.current.generation) {
-    this.current = { phase, message, generation, revision: this.current.revision + 1 }
+    this.current = { phase, message, generation, revision: this.current.revision + 1, ...(this.ideQuotaEnabled ? { antigravityIdeQuotaEnabled: true } : {}), ...(this.ideSharedAccount ? { antigravityIdeSharedAccount: true } : {}) }
     for (const listener of this.listeners) listener(this.state)
   }
-  start(sources: AgentSources): Promise<void> {
+  start(sources: AgentSources, ideQuotaEnabled = false, ideSharedAccount = false): Promise<void> {
     if (this.starting) return this.starting
     if (this.current.phase === 'ready') return Promise.resolve()
+    this.ideQuotaEnabled = ideQuotaEnabled
+    this.ideSharedAccount = ideSharedAccount
     const epoch = ++this.epoch
     this.starting = this.launch(sources, epoch).finally(() => { this.starting = undefined })
     return this.starting
@@ -72,12 +77,16 @@ export class BackendManager {
         for (const key of ['JAVA_HOME', 'JRE_HOME', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'CLASSPATH']) delete env[key]
       }
       env.LLM_METER_DESKTOP_TOKEN = this.token
+      if (this.options.ideHubPid !== undefined && (!Number.isSafeInteger(this.options.ideHubPid) || this.options.ideHubPid < 1)) throw new StartupError('Invalid IDE process selection.')
       const child = (this.options.launch ?? spawn)(this.options.javaCommand ?? 'java', [
         '-jar', this.options.jarPath, '--server.address=127.0.0.1', '--server.port=0',
         '--spring.config.location=classpath:/application.properties', '--spring.profiles.active=desktop',
         '--spring.devtools.restart.enabled=false', '--spring.main.banner-mode=off', '--logging.level.root=ERROR',
         ...(sources.CODEX ? [`--llm-meter.codex.sessions-directory=${sources.CODEX}`] : []),
         ...(sources.ANTIGRAVITY ? [`--llm-meter.antigravity.brain-directory=${sources.ANTIGRAVITY}`] : []),
+        `--llm-meter.antigravity.ide-quota-enabled=${this.ideQuotaEnabled}`,
+        `--llm-meter.antigravity.ide-shared-account=${this.ideSharedAccount}`,
+        ...(this.ideQuotaEnabled && this.options.ideHubPid ? [`--llm-meter.antigravity.ide-hub-pid=${this.options.ideHubPid}`] : []),
         ...(sources.KIRO ? [`--llm-meter.kiro.sessions-directory=${sources.KIRO}`] : []),
         `--llm-meter.desktop.ready-file=${ready}`,
         `--llm-meter.desktop.instance-id=${generation}`,
