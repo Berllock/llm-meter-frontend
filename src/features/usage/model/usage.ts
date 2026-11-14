@@ -36,11 +36,14 @@ export function formatTokens(value: number | null, compact = false): string {
 }
 
 export type ProviderCoverage = Readonly<{ provider: string; observedSessions: number; pendingSessions: number; tokenCountsAvailable?: boolean }>
+export const collectionFailureReasons = ['READ_FAILURE', 'NO_TOKEN_COUNT', 'NO_USAGE_RECORD', 'INVALID_JSON', 'INVALID_METRICS', 'INVALID_IDENTITY', 'UNSUPPORTED_HISTORY', 'CONFLICTING_DATA', 'INVALID_TIMESTAMP', 'INVALID_SEQUENCE', 'COUNTER_RESET', 'OVERFLOW', 'UNKNOWN'] as const
+export type ProviderUsageFailure = Readonly<{ provider: Agent; reason: (typeof collectionFailureReasons)[number] }>
 export type DailyUsageCollection = UsagePeriod & Readonly<{
-  status: 'COMPLETE' | 'PARTIAL'
+  status: 'COMPLETE' | 'PARTIAL' | 'FAILED'
   usage: DailyUsage[]
   coverage: ProviderCoverage[]
   modelUsage?: ModelDailyUsage[]
+  failures?: ProviderUsageFailure[]
 }>
 
 // Credits use decimal strings so aggregation never introduces floating-point token/currency conversions.

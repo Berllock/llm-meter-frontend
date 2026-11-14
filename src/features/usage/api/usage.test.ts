@@ -102,3 +102,29 @@ it('rejects contradictory model attribution', () => {
     expect(() => parseDailyCollection({ ...collection(period, [row]), modelUsage }, period)).toThrow(UsageApiError)
   }
 })
+
+// Validates source errors preserve healthy observations, omit failed coverage and accept an entirely failed selection.
+it('parses isolated source failures without fabricating zero coverage', () => {
+  const failures = [{ provider: 'ANTIGRAVITY', reason: 'INVALID_SEQUENCE', message: 'PRIVATE_DETAIL' }]
+  const partial = parseDailyCollection({ ...collection(period, [row]), status: 'PARTIAL', failures }, period)
+  expect(partial.usage).toEqual([row])
+  expect(partial.coverage).toEqual(collection(period, [row]).coverage)
+  expect(partial.failures).toEqual([{ provider: 'ANTIGRAVITY', reason: 'INVALID_SEQUENCE' }])
+  const failed = { ...period, status: 'FAILED', usage: [], coverage: [], failures: [{ provider: 'KIRO', reason: 'READ_FAILURE' }] }
+  expect(parseDailyCollection(failed, { ...period, provider: 'KIRO' }).status).toBe('FAILED')
+  expect(() => parseDailyCollection(failed, { ...period, provider: 'CODEX' })).toThrow(UsageApiError)
+})
+
+// Validates contradictory status, duplicate sources, unknown failure codes and failed-provider observations are refused.
+it('rejects contradictory source failure responses', () => {
+  const failure = { provider: 'ANTIGRAVITY', reason: 'READ_FAILURE' }
+  const partial = { ...collection(period, [row]), status: 'PARTIAL', failures: [failure] }
+  for (const payload of [
+    { ...partial, status: 'COMPLETE' }, { ...partial, status: 'FAILED' }, { ...partial, failures: [] },
+    { ...partial, failures: [failure, failure] }, { ...partial, failures: [{ ...failure, reason: 'PRIVATE_DETAIL' }] },
+    { ...partial, failures: [{ ...failure, provider: 'private/path' }] },
+    { ...partial, failures: [{ ...failure, provider: 'CODEX' }] },
+    { ...partial, usage: [row, { ...row, provider: 'ANTIGRAVITY' }] },
+    { ...period, status: 'FAILED', usage: [], coverage: [], failures: [] },
+  ]) expect(() => parseDailyCollection(payload, period)).toThrow(UsageApiError)
+})

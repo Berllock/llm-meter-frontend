@@ -1,7 +1,7 @@
 import { readDesktopUsage } from '../../../desktop/request'
 import { isDate } from '../model/dates'
-import { metrics, validCredits, addTokens } from '../model/usage'
-import type { DailyUsage, DailyUsageCollection, ProviderCoverage, UsageQuery, ModelDailyUsage } from '../model/usage'
+import { metrics, validCredits, addTokens, agents, collectionFailureReasons } from '../model/usage'
+import type { DailyUsage, DailyUsageCollection, ProviderCoverage, UsageQuery, ModelDailyUsage, ProviderUsageFailure } from '../model/usage'
 
 export class UsageApiError extends Error {
   readonly status: number | null
@@ -35,7 +35,7 @@ export function parseDailyCollection(payload: unknown, period: UsageQuery): Dail
   if (!payload || typeof payload !== 'object') throw invalid()
   const value = payload as Record<string, unknown>
   if (value.from !== period.from || value.to !== period.to || value.zone !== period.zone
-    || !['COMPLETE', 'PARTIAL'].includes(value.status as string) || !Array.isArray(value.coverage)) throw invalid()
+    || !['COMPLETE', 'PARTIAL', 'FAILED'].includes(value.status as string) || !Array.isArray(value.coverage)) throw invalid()
   const providers = new Map<string, ProviderCoverage>()
   let sessions = 0
   const coverage = value.coverage.map((entry: unknown) => {
@@ -52,7 +52,22 @@ export function parseDailyCollection(payload: unknown, period: UsageQuery): Dail
     providers.set(row.provider, row)
     return row
   })
-  if ((value.status === 'PARTIAL') !== coverage.some(item => item.pendingSessions > 0)) throw invalid()
+  let failures: ProviderUsageFailure[] | undefined
+  if (value.failures !== undefined) {
+    if (!Array.isArray(value.failures) || value.failures.length > agents.length) throw invalid()
+    const failed = new Set<string>()
+    failures = value.failures.map((entry: unknown) => {
+      if (!entry || typeof entry !== 'object') throw invalid()
+      const item = entry as Record<string, unknown>
+      if (!agents.includes(item.provider as ProviderUsageFailure['provider']) || failed.has(item.provider as string) || providers.has(item.provider as string)
+        || period.provider && item.provider !== period.provider || !collectionFailureReasons.includes(item.reason as ProviderUsageFailure['reason'])) throw invalid()
+      failed.add(item.provider as string)
+      return { provider: item.provider as ProviderUsageFailure['provider'], reason: item.reason as ProviderUsageFailure['reason'] }
+    })
+  }
+  const hasFailures = !!failures?.length
+  const expectedStatus = hasFailures && !coverage.length ? 'FAILED' : hasFailures || coverage.some(item => item.pendingSessions > 0) ? 'PARTIAL' : 'COMPLETE'
+  if (value.status !== expectedStatus) throw invalid()
   const usage = parseDailyUsage(value.usage, period)
   if (period.provider && coverage.some(row => row.provider !== period.provider)) throw invalid()
   if (usage.some(row => !providers.has(row.provider) || providers.get(row.provider)!.observedSessions === 0)) throw invalid()
@@ -79,7 +94,7 @@ export function parseDailyCollection(payload: unknown, period: UsageQuery): Dail
       if (!parts.length || metrics.some(metric => addTokens(parts.map(row => row[metric])) !== day[metric])) throw invalid()
     }
   }
-  return { ...period, status: value.status as DailyUsageCollection['status'], usage, coverage, ...(modelUsage !== undefined ? { modelUsage } : {}) }
+  return { ...period, status: value.status as DailyUsageCollection['status'], usage, coverage, ...(modelUsage !== undefined ? { modelUsage } : {}), ...(failures !== undefined ? { failures } : {}) }
 }
 
 export async function fetchDailyUsage(period: UsageQuery, signal?: AbortSignal): Promise<DailyUsageCollection> {

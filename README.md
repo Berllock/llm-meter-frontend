@@ -29,7 +29,7 @@ Desktop startup discovers existing default sources at `~/.codex/sessions` and
 **Choose Antigravity brain folder** for Antigravity and **Choose Kiro CLI sessions folder** for Kiro; each source is saved separately
 in Electron's user-data settings. Existing Codex-only settings remain readable.
 **Restart service** recovers from startup or process failures. No usage history is
-persisted by this setting. Invalid source contents still yield a safe collection failure. Valid identified
+persisted by this setting. Invalid source contents produce an explicit per-agent failure while healthy sources remain visible. Valid identified
 sessions without counters are reported as pending alongside proven observations.
 
 Java binds to loopback on an OS-selected free port, independent of an IDE backend
@@ -106,7 +106,7 @@ The desktop bridge bypasses these Vite proxies; its backend has its own private 
 - Provider/day records with exact counts and an explicit unavailable state.
 - Five-second polling, pause, and manual refresh. Desktop polling continues while
   minimized or hidden; browser polling pauses in background.
-- Loading, empty, collection failure, and stale-data states. Previous data is
+- Loading, empty, per-agent failure, all-source failure, and stale-data states. Previous data is
   clearly marked stale after a refresh error, never relabeled as a current result.
 - Responsive layout, native form controls, reduced-motion support, and no external
   fonts, analytics, or demo data in the running application.
@@ -128,8 +128,8 @@ Kiro's native format exposes recorded credits rather than exact tokens. Optional
 labeled known token subtotal. Their credits/context percentages are never converted
 to tokens. See [Kiro integration](../llm-meter-personal/docs/kiro-integration.md).
 The response echoes the period and includes `usage`, `coverage` per provider, and
-`status` (`COMPLETE` or `PARTIAL`). Legacy array and cumulative endpoints remain
-strict and are not used by the dashboard.
+`status` (`COMPLETE`, `PARTIAL`, or `FAILED`), plus optional per-agent `failures`.
+Legacy array and cumulative endpoints remain strict and are not used by the dashboard.
 It validates responses before display. Missing or null metrics never become zero;
 empty coverage does not prove zero account-wide usage. Cached input is already a
 subset of input and is not added to observed total tokens. Multiple providers are
@@ -208,16 +208,21 @@ ignored under `test-results/`; no real session data belongs in fixtures.
 There is no database or new historical store. Calendar coverage still depends on
 available session observations. Collection validates the entire source before date
 filtering. Valid identified sessions without counters stay pending; malformed data,
-unsafe attribution, conflicting copies, and other hard failures still return 503.
+unsafe attribution, conflicting copies, and other hard failures mark that agent as
+unavailable. The dashboard keeps healthy sources visible; legacy endpoints still
+return 503 for unsafe data.
 Coverage counts unique source sessions, not files, token percentages, or sessions
 within the selected date range. Pending usage cannot yet be attributed to a date.
-`COMPLETE` means no pending sessions in this source snapshot, not complete billing
+`COMPLETE` means no pending sessions or failed sources in this snapshot, not complete billing
 or account-wide usage; unknown metrics remain unavailable.
 
 The UI labels values as observations and warns about partial coverage, including
 pending-only periods without invented zeros. Each collection rechecks pending files.
-Hard failures retain the last successful collection and its coverage in memory,
-explicitly marked stale/current coverage unknown. This cache is scoped to the same
+Per-agent failures remove that agent from fresh values and coverage, with a named
+error and known-subtotal labeling. If every source fails, `FAILED` explicitly means
+usage is unknown. Request/transport failures retain the previous collection
+response in memory, explicitly marked stale/current coverage unknown. This cache
+is scoped to the same
 period and source generation and does not survive an application restart. Token
 metric controls apply to the chart and its observed-token summary; cards/table
 retain all metrics. Full backend contract: `../llm-meter-personal/docs/usage-coverage.md`.

@@ -352,3 +352,73 @@ test('shows reported Kiro account quota without token or API cost conversion', a
   await expect(page.getByRole('region', { name: 'Kiro credit observations' })).toContainText('1.25')
   await expect(page.getByText('Known token subtotal')).toHaveCount(0)
 })
+
+// Validates healthy token/credit observations remain visible and filtering a failed agent exposes an explicit failure.
+test('isolates failed agents and preserves scoped healthy observations', async ({ page }) => {
+  await page.route('**/api/usage/daily/collection?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    const provider = params.get('provider')
+    const usage = [
+      { provider: 'CODEX', date: params.get('to'), zone: params.get('zone'), inputTokens: 100, outputTokens: 10, cachedTokens: 50 },
+      { provider: 'KIRO', date: params.get('to'), zone: params.get('zone'), inputTokens: null, outputTokens: null, cachedTokens: null, credits: '1.25' },
+    ].filter(row => !provider || row.provider === provider)
+    const failures = !provider || provider === 'ANTIGRAVITY' ? [{ provider: 'ANTIGRAVITY', reason: 'INVALID_SEQUENCE' }] : []
+    return route.fulfill({ json: { from: params.get('from'), to: params.get('to'), zone: params.get('zone'),
+      status: provider === 'ANTIGRAVITY' ? 'FAILED' : failures.length ? 'PARTIAL' : 'COMPLETE', usage,
+      coverage: usage.map(row => ({ provider: row.provider, observedSessions: 1, pendingSessions: 0, tokenCountsAvailable: row.provider !== 'KIRO' })), failures } })
+  })
+  await page.goto('/')
+  await expect(page.getByRole('region', { name: 'Unavailable usage sources' })).toContainText('ANTIGRAVITY')
+  await expect(page.getByRole('region', { name: 'Selected period observations' })).toContainText('Known token subtotal')
+  await expect(page.getByRole('region', { name: 'Selected period observations' })).toContainText('110')
+  await expect(page.getByRole('region', { name: 'Kiro credit observations' })).toContainText('1.25')
+  await expect(page.getByRole('status')).toHaveText('Collection incomplete')
+  await page.getByLabel('Agent', { exact: true }).selectOption('ANTIGRAVITY')
+  await expect(page.getByRole('region', { name: 'Unavailable usage sources' })).toContainText('failed for every selected source')
+  await expect(page.getByRole('status')).toHaveText('Collection unavailable')
+  await expect(page.getByText('No recorded usage in this period')).toHaveCount(0)
+  await expect(page.getByRole('table')).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Chart metric' })).toHaveCount(0)
+  await page.getByLabel('Agent', { exact: true }).selectOption('CODEX')
+  await expect(page.getByRole('region', { name: 'Unavailable usage sources' })).toHaveCount(0)
+  await expect(page.getByRole('status')).toHaveText('API connected')
+  await expect(page.getByRole('table')).toContainText('CODEX')
+})
+
+// Validates failed refreshes remove a source's previous values and all-source failure recovers through manual retry.
+test('replaces old source values on partial failure and recovers after all sources fail', async ({ page }) => {
+  let mode: 'healthy' | 'partial' | 'failed' = 'healthy'
+  await page.route('**/api/usage/daily/collection?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    const all = [
+      { provider: 'CODEX', date: params.get('to'), zone: params.get('zone'), inputTokens: 100, outputTokens: 10, cachedTokens: 50 },
+      { provider: 'ANTIGRAVITY', date: params.get('to'), zone: params.get('zone'), inputTokens: 200, outputTokens: 20, cachedTokens: 80 },
+    ]
+    const usage = all.filter(row => mode === 'healthy' || mode === 'partial' && row.provider === 'ANTIGRAVITY')
+    const failures = all.filter(row => !usage.includes(row)).map(row => ({ provider: row.provider, reason: 'READ_FAILURE' }))
+    return route.fulfill({ json: { from: params.get('from'), to: params.get('to'), zone: params.get('zone'),
+      status: mode === 'failed' ? 'FAILED' : mode === 'partial' ? 'PARTIAL' : 'COMPLETE', usage, failures,
+      coverage: usage.map(row => ({ provider: row.provider, observedSessions: 1, pendingSessions: 0 })) } })
+  })
+  await page.goto('/')
+  await expect(page.getByRole('table')).toContainText('CODEX')
+  await page.getByRole('checkbox', { name: /Auto-refresh/ }).uncheck()
+  mode = 'partial'
+  await page.getByRole('button', { name: 'Refresh usage' }).click()
+  await expect(page.getByRole('region', { name: 'Unavailable usage sources' })).toContainText('CODEX')
+  await expect(page.getByRole('table')).not.toContainText('CODEX')
+  await expect(page.getByRole('table')).toContainText('ANTIGRAVITY')
+  await expect(page.getByRole('region', { name: 'Selected period observations' })).toContainText('220')
+  mode = 'failed'
+  await page.getByRole('button', { name: 'Retry sources' }).click()
+  await expect(page.getByRole('region', { name: 'Unavailable usage sources' })).toContainText('failed for every selected source')
+  await expect(page.getByRole('region', { name: 'Collection coverage' })).toContainText('coverage is unavailable')
+  await expect(page.getByRole('table')).toHaveCount(0)
+  await expect(page.getByText('No recorded usage in this period')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Selected period observations' })).toContainText('—')
+  mode = 'healthy'
+  await page.getByRole('button', { name: 'Retry sources' }).click()
+  await expect(page.getByRole('region', { name: 'Unavailable usage sources' })).toHaveCount(0)
+  await expect(page.getByRole('table')).toContainText('CODEX')
+  await expect(page.getByRole('status')).toHaveText('API connected')
+})
