@@ -243,6 +243,17 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
   assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.status, 'ESTIMATED')
   assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.sampleCount, 3)
   assert.equal(JSON.stringify(forecastResult.body).includes('synthetic-account'), false)
+  // Native-format account metadata reaches comparison context, never raw HTTP fields or private identity in the archive.
+  const identifiedHistory = await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))
+  const identifiedEntry = identifiedHistory.body.observations.find(entry => entry.accountVerified)
+  assert.ok(identifiedEntry)
+  assert.equal(identifiedEntry.comparability.accountStatus, 'RECORDED_ACCOUNT')
+  assert.equal(identifiedEntry.comparability.groups[0].reasons.length, 0)
+  assert.match(identifiedEntry.comparability.groups[0].key, /^[a-f0-9]{64}$/)
+  assert.equal(JSON.stringify(identifiedHistory.body).includes('synthetic-account'), false)
+  assert.equal(JSON.stringify(identifiedHistory.body).includes('accountFingerprint'), false)
+  assert.equal((await readFile(join(settings, 'quota-history', 'codex.json'), 'utf8')).includes('synthetic-account'), false)
+
   if (!packaged) {
     // Validate Kiro opt-in, ACP query, credit balance rendering and throttling through actual Electron/Java.
     await page.getByLabel('Read Kiro account credits').check()
@@ -251,6 +262,12 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     const creditQuota = await page.evaluate(() => window.llmMeter.readQuota('KIRO', crypto.randomUUID()))
     assert.equal(creditQuota.body[0].snapshot.source, 'KIRO_CLI')
     assert.equal(creditQuota.body[0].snapshot.creditQuota.allowances[0].remaining, '7.5')
+    const creditComparison = await page.evaluate(() => window.llmMeter.readQuotaHistory('KIRO', crypto.randomUUID()))
+    assert.equal(creditComparison.body.observations[0].accountVerified, false)
+    assert.equal(creditComparison.body.observations[0].comparability.accountStatus, 'UNVERIFIED')
+    assert.equal(creditComparison.body.observations[0].comparability.groups[0].key, null)
+    assert.equal(creditComparison.body.observations[0].comparability.groups[0].reasons.includes('RESET_DATE_ONLY'), true)
+
     assert.equal((await readFile(join(root, 'kiro-calls'), 'utf8')).trim().split('\n').length, 1)
     // Exercise the actual opt-in, Java process discovery, fixed RPC, reader, quota IPC and dashboard using only the fake IDE.
     await page.getByLabel('Read Antigravity IDE quota').check()
@@ -267,6 +284,9 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     assert.equal(savedIdeQuota.body.status, 'READY')
     assert.equal(savedIdeQuota.body.observations[0].snapshot.source, 'ANTIGRAVITY_IDE')
     assert.equal(savedIdeQuota.body.observations[0].snapshot.windows[0].usedPercent, 40)
+    assert.equal(savedIdeQuota.body.observations[0].comparability.accountStatus, 'UNVERIFIED')
+    assert.equal(savedIdeQuota.body.observations[0].comparability.groups[0].key, null)
+
     assert.equal(JSON.stringify(savedIdeQuota.body).includes('SYNTHETIC_IDE_TEST_TOKEN'), false)
 
     assert.equal(JSON.stringify(ideResult.body).includes('SYNTHETIC_IDE_TEST_TOKEN'), false)
@@ -276,7 +296,9 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     await page.getByLabel('IDE windows share one account').check()
     await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.antigravityIdeSharedAccount === true }, { timeout: 60_000 }).toBe(true)
     assert.equal(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')).antigravityIdeSharedAccount, true)
+    const beforeIdeRestart = await page.evaluate(() => window.llmMeter.getBackendState())
     await page.getByRole('button', { name: 'Restart service' }).click()
+    await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.generation !== beforeIdeRestart.generation }, { timeout: 60_000 }).toBe(true)
     await expect(page.getByLabel('Read Antigravity IDE quota')).toBeEnabled({ timeout: 60_000 })
     await expect(page.getByLabel('Read Antigravity IDE quota')).toBeChecked()
     await expect(idePanel).toContainText('Synthetic IDE model', { timeout: 15_000 })
@@ -295,6 +317,8 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     idePanel = page.getByRole('region', { name: 'Plan quota observations' })
     await expect(idePanel).toContainText('Synthetic IDE model', { timeout: 15_000 })
     await expect(page.getByLabel('Read Kiro account credits')).toBeChecked()
+    const restoredAccountContext = await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))
+    assert.equal(restoredAccountContext.body.observations.some(entry => entry.id === identifiedEntry.id && entry.comparability.groups[0].key === identifiedEntry.comparability.groups[0].key), true)
     const restoredCreditHistory = await page.evaluate(() => window.llmMeter.readQuotaHistory('KIRO', crypto.randomUUID()))
     assert.equal(restoredCreditHistory.body.observations.some(entry => entry.id === savedCreditId), true)
 
@@ -372,7 +396,7 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     await application.close(); application = undefined
     await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
   }
-  console.log('Desktop integration passed: three agents, recorded Kiro credits, opt-in Kiro account quota, normalized token subtotals, provider/date/metric filters, background updates, safe failure isolation, durable quota history, per-agent settings, relaunch, and owned Java cleanup.')
+  console.log('Desktop integration passed: three agents, recorded Kiro credits, opt-in Kiro account quota, normalized token subtotals, provider/date/metric filters, background updates, safe failure isolation, durable quota history, recorded account/cycle contexts, per-agent settings, relaunch, and owned Java cleanup.')
 } finally {
   if (application) await application.close()
   if (ideHub && ideHub.exitCode === null && ideHub.signalCode === null) {

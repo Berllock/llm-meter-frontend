@@ -267,8 +267,15 @@ This integration uses the installed Kiro CLI 3.1.0 ACP account extension and can
 
 The desktop now saves successful quota observations under its persistent app-data `quota-history` folder. Open **Saved quota observations** to review recorded plan windows, credit balances and renewal/expiry dates after restarting the app, including when a live quota source is currently unavailable. The panel follows the Agent filter and loads only when opened.
 
-Records retain source/query time and first-save time. Repeated polls of the same source observation are deduplicated; derived forecasts are not archived. Window resets and credit pools remain separate. Every archive observation has unverified account identity and is displayed as history, never a current balance or a new forecast.
+Records retain source/query time and first-save time. Repeated polls of the same source observation are deduplicated; derived forecasts are not archived. Window resets and credit pools remain separate. Saved records describe account/cycle evidence per observation. Codex can identify an account from recorded session metadata; Kiro and Antigravity currently remain unverified. All values are displayed as history, never as a current balance or a new forecast.
 
 Each provider file is bounded to 5,000 observations and 16 MiB, with a 30-day view/retention policy based on first-save time; size limits can remove older records sooner. History starts with successful quota queries after this update. It does not reconstruct every earlier log event or replace daily usage reconstruction from native files.
 
 Browser/Spring mode enables persistence through an explicit absolute `llm-meter.quota.history-directory`. The API is `/api/quota/history?provider=CODEX&limit=20`. Desktop uses narrow authenticated IPC and its own app-data path. Read/write failures remain separate from live quota; corrupt files are preserved for recovery. See backend `docs/quota-history.md` for schema, scope, bounds and validation.
+
+
+## Recorded quota comparison context
+
+Expand a saved observation to see whether its recorded account, plan and reset window are identified. Matching Codex contexts show a count of distinct source timestamps among the loaded records. Account, plan, scope, duration or reset changes stay in separate groups. This identifies recorded metadata, not the account currently signed into a client, and does not calculate a new forecast.
+
+Kiro/Antigravity entries explain missing account/plan evidence and date-only or unidentified credit cycles. Subscription display names, configured plans, folders and shared-IDE preferences do not establish account identity. Legacy version-1 records remain unverified with their original IDs/times; the next successful write preserves them in version 2. Raw account IDs and private account fingerprints are not exposed through the history API. See backend `docs/quota-comparability.md` for the evidence policy, migration and privacy contract.

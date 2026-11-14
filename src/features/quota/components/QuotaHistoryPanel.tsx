@@ -3,14 +3,17 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchQuotaHistory } from '../api/history'
 import type { QuotaHistoryEntry } from '../api/history'
 import type { Agent } from '../../usage/model/usage'
+import { QuotaComparisonDetails } from './QuotaComparisonDetails'
+import { contextObservationCounts } from '../model/comparability'
 
-function SavedObservation({ entry }: { entry: QuotaHistoryEntry }) {
+function SavedObservation({ entry, counts }: { entry: QuotaHistoryEntry; counts: ReadonlyMap<string, number> }) {
   const [open, setOpen] = useState(false)
   const snapshot = entry.snapshot
   return <li><details onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>{entry.provider} · {snapshot.source ? 'Queried' : 'Observed'} {new Date(snapshot.observedAt).toLocaleString()} · {snapshot.creditQuota ? 'Credit pools' : `${snapshot.windows.length} quota windows`}</summary>
     {open && <div className="quota-window">
       <p>First saved {new Date(entry.savedAt).toLocaleString()} · Reported plan: {snapshot.creditQuota?.planName ?? snapshot.planType ?? 'Not identified'}</p>
+      <QuotaComparisonDetails entry={entry} counts={counts} />
       {snapshot.windows.map(window => <p key={`${window.limitId}:${window.name}`}>
         {window.displayName ?? window.limitId ?? 'Unspecified scope'} · {window.name}: {window.usedPercent.toLocaleString(undefined, { maximumFractionDigits: 2 })}% used at observation · {snapshot.source ? 'Queried' : 'Observed'} {new Date(window.observedAt).toLocaleString()} · Reset reported for {new Date(window.resetAt).toLocaleString()}
       </p>)}
@@ -33,10 +36,11 @@ export function QuotaHistoryPanel({ provider, autoRefresh, runtime }: { provider
   const query = useQuery({ enabled: runtime.enabled && open, queryKey: ['quota-history', runtime.generation, provider ?? 'ALL'],
     queryFn: ({ signal }) => fetchQuotaHistory(provider, signal), retry: false, networkMode: 'always', staleTime: 15_000, gcTime: 60_000,
     refetchInterval: open && autoRefresh ? 30_000 : false, refetchIntervalInBackground: runtime.refreshInBackground, refetchOnWindowFocus: autoRefresh })
+  const counts = contextObservationCounts(query.data?.observations ?? [])
   return <section className="panel quota-panel" aria-label="Saved quota history"><details onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>Saved quota observations</summary>
     {open && <>
-      <p className="quota-note">Saved observations are historical records, not a current balance. Account identity is unverified; observations are not combined across reset windows or used for new forecasts.</p>
+      <p className="quota-note">Saved observations are historical records, not a current balance. Account and cycle evidence are checked per observation. Matching context alone does not establish a forecast.</p>
       <button className="button" disabled={!runtime.enabled || query.isFetching} onClick={() => void query.refetch()}>Refresh saved history</button>
       {query.isPending && <p className="quota-note">{runtime.enabled ? 'Loading saved observations…' : 'Waiting for the local service.'}</p>}
       {query.isError && <p role="alert">Saved history could not be refreshed.{query.data ? ' Showing the last loaded archive response.' : ''} Current quota collection remains independent.</p>}
@@ -45,7 +49,7 @@ export function QuotaHistoryPanel({ provider, autoRefresh, runtime }: { provider
       {query.data && query.data.status !== 'DISABLED' && <>
         <p className="quota-note">Latest {query.data.observations.length} saved observations for the configured sources · Up to {query.data.retentionDays} days retained, subject to storage limits. History starts when observations are saved.</p>
         {!query.data.observations.length && query.data.status === 'READY' && <p>No saved quota observations for these sources yet.</p>}
-        <ol>{query.data.observations.map(entry => <SavedObservation key={entry.id} entry={entry} />)}</ol>
+        <ol>{query.data.observations.map(entry => <SavedObservation key={entry.id} entry={entry} counts={counts} />)}</ol>
       </>}
     </>}
   </details></section>

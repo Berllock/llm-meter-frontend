@@ -452,7 +452,7 @@ test('shows saved quota cycles independently from live quota and selected agent'
   await panel.getByText('Saved quota observations', { exact: true }).click()
   await expect(panel.locator('ol > li')).toHaveCount(2)
   await expect(panel).toContainText('not a current balance')
-  await expect(panel).toContainText('Account identity is unverified')
+  await expect(panel).toContainText('Account and cycle evidence are checked per observation')
   await panel.locator('ol summary').first().click()
   await expect(panel).toContainText('40% used at observation')
   await expect(panel.getByRole('progressbar')).toHaveCount(0)
@@ -486,4 +486,53 @@ test('keeps current quota available when saved history cannot be read', async ({
   await expect(panel.getByText(/Saved history could not be refreshed/)).toBeVisible()
   await expect(panel).not.toContainText('PRIVATE_HISTORY_PATH')
   await expect(live).toContainText('20% last reported used')
+})
+
+// Validates matched recorded contexts stay separate from changed contexts and unsupported agent identity/cycle evidence.
+test('explains identified and unverified quota comparison contexts', async ({ page }) => {
+  await page.route('**/api/usage/daily/collection?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    const provider = params.get('provider') ?? 'CODEX'
+    return route.fulfill({ json: { from: params.get('from'), to: params.get('to'), zone: params.get('zone'), status: 'COMPLETE', usage: [],
+      coverage: [{ provider, observedSessions: 0, pendingSessions: 0, tokenCountsAvailable: provider !== 'KIRO' }] } })
+  })
+  await page.route('**/api/quota/history?*', route => {
+    const provider = new URL(route.request().url()).searchParams.get('provider') ?? 'CODEX'
+    const observedAt = '2026-11-14T12:00:00Z'
+    let observations: unknown[]
+    if (provider === 'CODEX') observations = [0, 1, 2].map(index => ({ id: String(index + 1).repeat(64), savedAt: observedAt, accountVerified: true,
+      comparability: { accountStatus: 'RECORDED_ACCOUNT', groups: [{ unit: 'PERCENTAGE', index: 0, key: (index === 2 ? 'c' : 'b').repeat(64), reasons: [] }] },
+      snapshot: { provider, observedAt, collectedAt: observedAt, planType: 'plus', windows: [{ name: 'primary', usedPercent: 20 + index, windowMinutes: 300,
+        resetAt: index === 2 ? '2026-11-14T17:00:00Z' : '2026-11-14T16:00:00Z', observedAt: `2026-11-14T12:0${index}:00Z`, limitId: 'codex' }] } }))
+    else if (provider === 'KIRO') observations = [{ id: 'd'.repeat(64), savedAt: observedAt, accountVerified: false,
+      comparability: { accountStatus: 'UNVERIFIED', groups: [{ unit: 'CREDITS', index: 0, key: null, reasons: ['ACCOUNT_UNVERIFIED', 'PLAN_UNVERIFIED', 'RESET_DATE_ONLY'] }] },
+      snapshot: { provider, source: 'KIRO_CLI', observedAt, collectedAt: observedAt, planType: null, windows: [],
+        creditQuota: { planName: 'Synthetic Free', renewalDate: '2026-12-01', overagesEnabled: false,
+          allowances: [{ kind: 'SUBSCRIPTION', name: 'Plan credits', used: '10', limit: '50', remaining: '40', expiresOn: null, daysUntilExpiry: null }] } } }]
+    else observations = [{ id: 'e'.repeat(64), savedAt: observedAt, accountVerified: false,
+      comparability: { accountStatus: 'UNVERIFIED', groups: [{ unit: 'PERCENTAGE', index: 0, key: null, reasons: ['ACCOUNT_UNVERIFIED', 'PLAN_UNVERIFIED', 'WINDOW_DURATION_UNVERIFIED'] }] },
+      snapshot: { provider, source: 'ANTIGRAVITY_IDE', observedAt, collectedAt: observedAt, planType: null, windows: [{ name: 'weekly', usedPercent: 20,
+        windowMinutes: null, resetAt: '2026-11-15T16:00:00Z', observedAt, limitId: 'model-a' }] } }]
+    return route.fulfill({ json: { status: 'READY', retentionDays: 30, observations, failures: [] } })
+  })
+  await page.goto('/')
+  const panel = page.getByRole('region', { name: 'Saved quota history' })
+  await panel.getByText('Saved quota observations', { exact: true }).click()
+  await expect(panel.locator('ol > li')).toHaveCount(3)
+  await panel.locator('ol summary').first().click()
+  await expect(panel).toContainText('Account identified from recorded session metadata')
+  await expect(panel).toContainText('Matched context in 2 distinct source timestamps shown')
+  await panel.locator('ol summary').nth(2).click()
+  await expect(panel).toContainText('Matched context in 1 distinct source timestamp shown')
+  await expect(panel).not.toContainText('b'.repeat(64))
+  await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
+  await expect(panel.locator('ol > li')).toHaveCount(1)
+  await panel.locator('ol summary').first().click()
+  await expect(panel).toContainText('Account identity is unverified')
+  await expect(panel).toContainText('not an exact reset time')
+  await expect(panel).not.toContainText('Matched context')
+  await page.getByLabel('Agent', { exact: true }).selectOption('ANTIGRAVITY')
+  await panel.locator('ol summary').first().click()
+  await expect(panel).toContainText('Window duration is unreported')
+  await expect(panel).not.toContainText('Matched context')
 })

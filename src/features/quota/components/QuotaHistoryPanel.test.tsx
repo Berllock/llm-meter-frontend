@@ -22,7 +22,7 @@ it('shows saved observations with distinct save and source times', async () => {
   expect(within(panel).queryByText(/First saved/)).toBeNull()
   await expand(panel.querySelector('details')!)
   expect(panel).toHaveTextContent('not a current balance')
-  expect(panel).toHaveTextContent('Account identity is unverified')
+  expect(panel).toHaveTextContent('Account and cycle evidence are checked per observation')
   const entry = panel.querySelector('ol details')!
   await expand(entry as HTMLDetailsElement)
   expect(panel).toHaveTextContent('40% used at observation')
