@@ -27,7 +27,7 @@ beforeEach(async () => {
       if (req.headers['x-llm-meter-token'] !== process.env.LLM_METER_DESKTOP_TOKEN) { res.writeHead(401).end(); return }
       res.setHeader('Content-Type', 'application/json')
       if (mode === 'collection-error') { res.writeHead(503).end(); return }
-      if (!req.url.startsWith('/api/usage/daily/collection?') && !req.url.startsWith('/api/quota?')) { res.writeHead(404).end(); return }
+      if (!req.url.startsWith('/api/usage/daily/collection?') && !req.url.startsWith('/api/quota?') && !req.url.startsWith('/api/quota/history?')) { res.writeHead(404).end(); return }
       res.end('[]')
     })
     server.listen(0, '127.0.0.1', () => {
@@ -40,8 +40,8 @@ afterEach(async () => {
   for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
   await rm(directory, { recursive: true, force: true })
 })
-function create(mode = '') {
-  manager = new BackendManager({ jarPath: join(directory, 'backend.jar'), startupTimeout: 2_000, stopTimeout: 100,
+function create(mode = '', historyDirectory?: string) {
+  manager = new BackendManager({ historyDirectory, jarPath: join(directory, 'backend.jar'), startupTimeout: 2_000, stopTimeout: 100,
     launch: ((_command: string, args: readonly string[], options: object) => {
       launchArguments = args
       readyFile = args.find(v => v.startsWith('--llm-meter.desktop.ready-file='))!.split('=').slice(1).join('=')
@@ -173,4 +173,15 @@ it('isolates Kiro account queries behind explicit opt-in', async () => {
   await manager.start({ KIRO: directory }, false, false, true)
   expect(launchArguments).toContain('--llm-meter.kiro.account-quota-enabled=true')
   expect(manager.state.kiroAccountQuotaEnabled).toBe(true)
+})
+
+// Validates archive IPC uses an authenticated fixed route, rejects path injection and is disabled by default in isolated tests.
+it('scopes persisted history to a fixed local route and explicit directory', async () => {
+  create(); await manager.start({ CODEX: directory })
+  expect(launchArguments).toContain('--llm-meter.quota.history-directory=')
+  expect(await manager.readQuotaHistory('CODEX')).toEqual({ status: 200, body: [] })
+  expect(await manager.readQuotaHistory('../private')).toEqual({ status: 400, body: null })
+  await manager.stop()
+  create('', join(directory, 'quota-history')); await manager.start({ CODEX: directory })
+  expect(launchArguments).toContain(`--llm-meter.quota.history-directory=${join(directory, 'quota-history')}`)
 })

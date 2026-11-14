@@ -9,6 +9,7 @@ type Options = {
   jarPath: string
   ideHubPid?: number
   kiroExecutable?: string
+  historyDirectory?: string
   javaCommand?: string
   bundledJava?: boolean
   startupTimeout?: number
@@ -82,6 +83,7 @@ export class BackendManager {
       env.LLM_METER_DESKTOP_TOKEN = this.token
       if (this.options.ideHubPid !== undefined && (!Number.isSafeInteger(this.options.ideHubPid) || this.options.ideHubPid < 1)) throw new StartupError('Invalid IDE process selection.')
       if (this.options.kiroExecutable !== undefined && !isAbsolute(this.options.kiroExecutable)) throw new StartupError('Invalid Kiro executable path.')
+      if (this.options.historyDirectory !== undefined && !isAbsolute(this.options.historyDirectory)) throw new StartupError('Invalid history directory.')
       const child = (this.options.launch ?? spawn)(this.options.javaCommand ?? 'java', [
         '-jar', this.options.jarPath, '--server.address=127.0.0.1', '--server.port=0',
         '--spring.config.location=classpath:/application.properties', '--spring.profiles.active=desktop',
@@ -94,6 +96,7 @@ export class BackendManager {
         `--llm-meter.antigravity.ide-shared-account=${this.ideSharedAccount}`,
         ...(this.ideQuotaEnabled && this.options.ideHubPid ? [`--llm-meter.antigravity.ide-hub-pid=${this.options.ideHubPid}`] : []),
         ...(sources.KIRO ? [`--llm-meter.kiro.sessions-directory=${sources.KIRO}`] : []),
+        `--llm-meter.quota.history-directory=${this.options.historyDirectory ?? ''}`,
         `--llm-meter.desktop.ready-file=${ready}`,
         `--llm-meter.desktop.instance-id=${generation}`,
       ], { cwd: this.directory, env, stdio: 'ignore', windowsHide: true })
@@ -137,7 +140,12 @@ export class BackendManager {
     if (!this.port || this.current.phase !== 'ready') return { status: 0, body: null }
     return this.request('/api/quota', new URLSearchParams(provider ? { provider: provider as string } : {}).toString(), signal)
   }
-  private async request(path: '/api/usage/daily/collection' | '/api/quota', params: string, signal?: AbortSignal): Promise<DesktopResponse> {
+  async readQuotaHistory(provider: unknown, signal?: AbortSignal): Promise<DesktopResponse> {
+    if (provider !== undefined && !['CODEX', 'ANTIGRAVITY', 'KIRO'].includes(provider as string)) return { status: 400, body: null }
+    if (!this.port || this.current.phase !== 'ready') return { status: 0, body: null }
+    return this.request('/api/quota/history', new URLSearchParams(provider ? { provider: provider as string } : {}).toString(), signal)
+  }
+  private async request(path: '/api/usage/daily/collection' | '/api/quota' | '/api/quota/history', params: string, signal?: AbortSignal): Promise<DesktopResponse> {
     try {
       const response = await fetch(`http://127.0.0.1:${this.port}${path}?${params}`, {
         headers: { Accept: 'application/json', 'X-LLM-Meter-Token': this.token },

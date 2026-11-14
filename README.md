@@ -262,3 +262,13 @@ The plan-limit panel shows reported plan-credit usage, allowance, remaining cred
 Queries are limited to one attempt per minute. The dashboard preserves the query timestamp and marks stale, failed or expired observations as unknown rather than assuming an automatic refill. The progress bar and proximity warning use reported credit limits. The CLI supplies a renewal date, not an exact reset time. No Kiro forecast or upgrade simulation is included.
 
 This integration uses the installed Kiro CLI 3.1.0 ACP account extension and can require adaptation after a CLI update. Browser development enables the backend through `llm-meter.kiro.account-quota-enabled=true` and an optional absolute `llm-meter.kiro.cli-executable`. See backend `docs/kiro-account-quota.md` for the protocol, precision limits, configuration and test isolation.
+
+## Persistent quota observations
+
+The desktop now saves successful quota observations under its persistent app-data `quota-history` folder. Open **Saved quota observations** to review recorded plan windows, credit balances and renewal/expiry dates after restarting the app, including when a live quota source is currently unavailable. The panel follows the Agent filter and loads only when opened.
+
+Records retain source/query time and first-save time. Repeated polls of the same source observation are deduplicated; derived forecasts are not archived. Window resets and credit pools remain separate. Every archive observation has unverified account identity and is displayed as history, never a current balance or a new forecast.
+
+Each provider file is bounded to 5,000 observations and 16 MiB, with a 30-day view/retention policy based on first-save time; size limits can remove older records sooner. History starts with successful quota queries after this update. It does not reconstruct every earlier log event or replace daily usage reconstruction from native files.
+
+Browser/Spring mode enables persistence through an explicit absolute `llm-meter.quota.history-directory`. The API is `/api/quota/history?provider=CODEX&limit=20`. Desktop uses narrow authenticated IPC and its own app-data path. Read/write failures remain separate from live quota; corrupt files are preserved for recovery. See backend `docs/quota-history.md` for schema, scope, bounds and validation.

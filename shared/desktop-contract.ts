@@ -15,6 +15,7 @@ export type DesktopBridge = {
   getBackendState(): Promise<BackendState>
   onBackendState(listener: (state: BackendState) => void): () => void
   readDailyUsage(period: DesktopPeriod, requestId: string): Promise<DesktopResponse>
+  readQuotaHistory(provider: DesktopAgent | undefined, requestId: string): Promise<DesktopResponse>
   readQuota(provider: DesktopAgent | undefined, requestId: string): Promise<DesktopResponse>
   cancelUsage(requestId: string): void
   setKiroAccountQuotaEnabled(enabled: boolean): Promise<void>

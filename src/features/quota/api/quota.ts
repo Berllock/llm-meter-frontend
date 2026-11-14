@@ -1,3 +1,4 @@
+import { fetchQuotaPayload } from './transport'
 import { parseForecast } from './forecast'
 import { parseCreditQuota } from './credits'
 import { agents } from '../../usage/model/usage'
@@ -55,29 +56,9 @@ export function parseQuota(value: unknown, provider?: Agent): ProviderQuota[] {
 }
 
 export async function fetchQuota(provider?: Agent, signal?: AbortSignal): Promise<ProviderQuota[]> {
-  const id = crypto.randomUUID()
-  const timeout = AbortSignal.timeout(35_000)
-  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
-  let cancel = () => {}
-  try {
-    let body: unknown
-    if (window.llmMeter) {
-      const cancelled = new Promise<never>((_resolve, reject) => {
-        cancel = () => { window.llmMeter?.cancelUsage(id); reject(combined.reason) }
-        combined.addEventListener('abort', cancel, { once: true })
-      })
-      combined.throwIfAborted()
-      const response = await Promise.race([window.llmMeter.readQuota(provider, id), cancelled])
-      if (response.status !== 200) throw new Error('Quota collection unavailable.')
-      body = response.body
-    } else {
-      const response = await fetch(`/api/quota?${new URLSearchParams(provider ? { provider } : {})}`, { signal: combined, headers: { Accept: 'application/json' } })
-      if (!response.ok) throw new Error('Quota collection unavailable.')
-      body = await response.json()
-    }
-    return parseQuota(body, provider)
-  } catch (error) {
+  try { return parseQuota(await fetchQuotaPayload(provider, signal), provider) }
+  catch (error) {
     if (signal?.aborted) throw error
     throw new Error('Quota could not be collected. Usage observations remain independent.')
-  } finally { combined.removeEventListener('abort', cancel) }
+  }
 }

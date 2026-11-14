@@ -92,6 +92,13 @@ function registerBridge() {
     requests.set(id, controller)
     try { return await backend.readQuota(provider, controller.signal) } finally { requests.delete(id) }
   })
+  ipcMain.handle('meter:quota-history', async (event, provider: unknown, id: unknown) => {
+    requireTrusted(event)
+    if (typeof id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(id) || requests.has(id) || requests.size >= 8) return { status: 0, body: null }
+    const controller = new AbortController()
+    requests.set(id, controller)
+    try { return await backend.readQuotaHistory(provider, controller.signal) } finally { requests.delete(id) }
+  })
   ipcMain.on('meter:cancel', (event, id: unknown) => { if (trusted(event) && typeof id === 'string') requests.get(id)?.abort() })
   backend.subscribe(state => { if (window && !window.isDestroyed()) window.webContents.send('meter:state-change', state) })
 }
@@ -114,7 +121,7 @@ else {
     const kiroExecutable = !app.isPackaged ? process.env.LLM_METER_KIRO_CLI_EXECUTABLE : undefined
     backend = new BackendManager({ ...await resolveBackendRuntime({
       packaged: app.isPackaged, appRoot: app.getAppPath(), resourcesPath: process.resourcesPath,
-    }), ...(ideHubPid ? { ideHubPid: Number(ideHubPid) } : {}), ...(kiroExecutable ? { kiroExecutable } : {}) })
+    }), historyDirectory: join(app.getPath('userData'), 'quota-history'), ...(ideHubPid ? { ideHubPid: Number(ideHubPid) } : {}), ...(kiroExecutable ? { kiroExecutable } : {}) })
     registerBridge()
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { label: 'File', submenu: [

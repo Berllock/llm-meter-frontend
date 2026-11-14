@@ -422,3 +422,68 @@ test('replaces old source values on partial failure and recovers after all sourc
   await expect(page.getByRole('table')).toContainText('CODEX')
   await expect(page.getByRole('status')).toHaveText('API connected')
 })
+
+// Validates saved cycles stay reviewable when current quota fails, with provider-scoped exact credit history and lazy reads.
+test('shows saved quota cycles independently from live quota and selected agent', async ({ page }) => {
+  await page.route('**/api/usage/daily/collection?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    if (params.get('provider') === 'KIRO') return route.fulfill({ json: { from: params.get('from'), to: params.get('to'), zone: params.get('zone'),
+      status: 'COMPLETE', usage: [], coverage: [{ provider: 'KIRO', observedSessions: 0, pendingSessions: 0, tokenCountsAvailable: false }] } })
+    return route.fulfill({ json: envelope(params) })
+  })
+  await page.route('**/api/quota?*', route => route.fulfill({ json: [{ provider: new URL(route.request().url()).searchParams.get('provider') ?? 'CODEX', status: 'ERROR', snapshot: null }] }))
+  let historyReads = 0
+  await page.route('**/api/quota/history?*', route => {
+    historyReads++
+    const provider = new URL(route.request().url()).searchParams.get('provider')
+    const observations = provider === 'KIRO' ? [{ id: 'c'.repeat(64), savedAt: '2026-11-02T12:01:00Z', accountVerified: false,
+      snapshot: { provider: 'KIRO', source: 'KIRO_CLI', observedAt: '2026-11-02T12:00:00Z', collectedAt: '2026-11-02T12:01:00Z', planType: null, windows: [],
+        creditQuota: { planName: 'Synthetic Free', renewalDate: '2026-12-01', overagesEnabled: false,
+          allowances: [{ kind: 'SUBSCRIPTION', name: 'Plan credits', used: '12.123456789012345678', limit: '50', remaining: '37.876543210987654322', expiresOn: null, daysUntilExpiry: null }] } } }]
+      : [2, 1].map(day => ({ id: (day === 2 ? 'b' : 'a').repeat(64), savedAt: `2026-11-0${day}T12:01:00Z`, accountVerified: false,
+        snapshot: { provider: 'CODEX', observedAt: `2026-11-0${day}T12:00:00Z`, collectedAt: `2026-11-0${day}T12:01:00Z`, planType: 'plus',
+          windows: [{ name: 'primary', usedPercent: day * 20, windowMinutes: 300, resetAt: `2026-11-0${day}T16:00:00Z`, observedAt: `2026-11-0${day}T12:00:00Z`, limitId: 'codex' }] } }))
+    return route.fulfill({ json: { status: 'READY', retentionDays: 30, observations, failures: [] } })
+  })
+  await page.goto('/')
+  await expect(page.getByRole('status')).toHaveText('API connected')
+  expect(historyReads).toBe(0)
+  const panel = page.getByRole('region', { name: 'Saved quota history' })
+  await panel.getByText('Saved quota observations', { exact: true }).click()
+  await expect(panel.locator('ol > li')).toHaveCount(2)
+  await expect(panel).toContainText('not a current balance')
+  await expect(panel).toContainText('Account identity is unverified')
+  await panel.locator('ol summary').first().click()
+  await expect(panel).toContainText('40% used at observation')
+  await expect(panel.getByRole('progressbar')).toHaveCount(0)
+  await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
+  await expect(panel.locator('ol > li')).toHaveCount(1)
+  await panel.locator('ol summary').first().click()
+  await expect(panel).toContainText('37.876543210987654322 remaining at observation')
+  await expect(panel).toContainText('2026-12-01')
+  await expect(panel).not.toContainText('40% used at observation')
+})
+
+// Validates archive errors remain separate from live quota and never appear as an empty successful history.
+test('keeps current quota available when saved history cannot be read', async ({ page }) => {
+  await intercept(page)
+  const observedAt = new Date().toISOString()
+  await page.route('**/api/quota?*', route => route.fulfill({ json: [{ provider: 'CODEX', status: 'OBSERVED', snapshot: {
+    observedAt, collectedAt: observedAt, planType: 'plus', windows: [{ name: 'primary', usedPercent: 20, windowMinutes: 300,
+      resetAt: new Date(Date.now() + 3600_000).toISOString(), observedAt, limitId: 'codex' }],
+  } }] }))
+  await page.route('**/api/quota/history?*', route => route.fulfill({ json: { status: 'ERROR', retentionDays: 30, observations: [], failures: ['CODEX'] } }))
+  await page.goto('/')
+  const live = page.getByRole('region', { name: 'Plan quota observations' })
+  await expect(live).toContainText('20% last reported used')
+  const panel = page.getByRole('region', { name: 'Saved quota history' })
+  await panel.getByText('Saved quota observations', { exact: true }).click()
+  await expect(panel.getByRole('alert')).toContainText('History could not be read or saved for CODEX')
+  await expect(panel).not.toContainText('No saved quota observations')
+  await expect(live).toContainText('20% last reported used')
+  await page.route('**/api/quota/history?*', route => route.fulfill({ status: 503, body: 'PRIVATE_HISTORY_PATH' }))
+  await panel.getByRole('button', { name: 'Refresh saved history' }).click()
+  await expect(panel.getByText(/Saved history could not be refreshed/)).toBeVisible()
+  await expect(panel).not.toContainText('PRIVATE_HISTORY_PATH')
+  await expect(live).toContainText('20% last reported used')
+})

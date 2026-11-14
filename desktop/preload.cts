@@ -9,6 +9,7 @@ const bridge: DesktopBridge = {
     return () => { ipcRenderer.removeListener('meter:state-change', receive) }
   },
   readDailyUsage: (period: DesktopPeriod, requestId: string) => ipcRenderer.invoke('meter:daily', period, requestId),
+  readQuotaHistory: (provider, requestId) => ipcRenderer.invoke('meter:quota-history', provider, requestId),
   readQuota: (provider, requestId) => ipcRenderer.invoke('meter:quota', provider, requestId),
   cancelUsage: requestId => ipcRenderer.send('meter:cancel', requestId),
   setKiroAccountQuotaEnabled: enabled => ipcRenderer.invoke('meter:kiro-account-quota', enabled),

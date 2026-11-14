@@ -102,6 +102,17 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
   assert.equal(quota.body[0].snapshot.planType, 'plus')
   assert.equal(quota.body[0].snapshot.limit, null)
   assert.equal(quota.body[0].snapshot.windows[0].usedPercent, 85)
+  // Validate durable quota storage and repeated-log deduplication through the authenticated archive IPC.
+  const savedQuota = await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))
+  assert.equal(savedQuota.status, 200)
+  assert.equal(savedQuota.body.status, 'READY')
+  assert.equal(savedQuota.body.observations.length, 1)
+  assert.equal(savedQuota.body.observations[0].accountVerified, false)
+  assert.equal(savedQuota.body.observations[0].snapshot.windows[0].forecast, undefined)
+  await page.evaluate(() => window.llmMeter.readQuota('CODEX', crypto.randomUUID()))
+  assert.equal((await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))).body.observations.length, 1)
+  assert.equal((await page.evaluate(() => window.llmMeter.readQuotaHistory('../private', crypto.randomUUID()))).status, 400)
+
   assert.equal((await page.evaluate(() => window.llmMeter.readQuota('../private', crypto.randomUUID()))).status, 400)
   await page.getByLabel('Start date').fill('2026-10-20')
   await page.getByLabel('End date').fill('2026-10-30')
@@ -252,6 +263,12 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     assert.equal(ideResult.body[0].snapshot.source, 'ANTIGRAVITY_IDE')
     assert.equal(ideResult.body[0].snapshot.planType, null)
     assert.equal(ideResult.body[0].snapshot.windows[0].forecast, undefined)
+    const savedIdeQuota = await page.evaluate(() => window.llmMeter.readQuotaHistory('ANTIGRAVITY', crypto.randomUUID()))
+    assert.equal(savedIdeQuota.body.status, 'READY')
+    assert.equal(savedIdeQuota.body.observations[0].snapshot.source, 'ANTIGRAVITY_IDE')
+    assert.equal(savedIdeQuota.body.observations[0].snapshot.windows[0].usedPercent, 40)
+    assert.equal(JSON.stringify(savedIdeQuota.body).includes('SYNTHETIC_IDE_TEST_TOKEN'), false)
+
     assert.equal(JSON.stringify(ideResult.body).includes('SYNTHETIC_IDE_TEST_TOKEN'), false)
     await page.getByRole('button', { name: 'Refresh quota' }).click()
     assert.equal((await readFile(join(root, 'ide-calls'), 'utf8')).trim().split('\n').length, 1)
@@ -263,6 +280,11 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     await expect(page.getByLabel('Read Antigravity IDE quota')).toBeEnabled({ timeout: 60_000 })
     await expect(page.getByLabel('Read Antigravity IDE quota')).toBeChecked()
     await expect(idePanel).toContainText('Synthetic IDE model', { timeout: 15_000 })
+    // Capture a native-format synthetic account observation and restore it through a new Java process.
+    const beforeRestartHistory = await page.evaluate(() => window.llmMeter.readQuotaHistory('KIRO', crypto.randomUUID()))
+    assert.equal(beforeRestartHistory.body.status, 'READY')
+    const savedCreditId = beforeRestartHistory.body.observations[0].id
+    assert.equal(beforeRestartHistory.body.observations[0].snapshot.creditQuota.allowances[0].remaining, '7.5')
     // Validate the opt-in survives full relaunch and the external synthetic IDE remains independently owned.
     await application.close(); application = undefined
     await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
@@ -273,6 +295,9 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     idePanel = page.getByRole('region', { name: 'Plan quota observations' })
     await expect(idePanel).toContainText('Synthetic IDE model', { timeout: 15_000 })
     await expect(page.getByLabel('Read Kiro account credits')).toBeChecked()
+    const restoredCreditHistory = await page.evaluate(() => window.llmMeter.readQuotaHistory('KIRO', crypto.randomUUID()))
+    assert.equal(restoredCreditHistory.body.observations.some(entry => entry.id === savedCreditId), true)
+
     await expect(idePanel).toContainText('42.5 used / 50 credits · 7.5 remaining at query time')
     await expect(page.getByLabel('IDE windows share one account')).toBeChecked()
     await page.getByLabel('IDE windows share one account').uncheck()
@@ -284,6 +309,29 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     await page.getByLabel('Read Kiro account credits').uncheck()
     await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && !next.kiroAccountQuotaEnabled }, { timeout: 60_000 }).toBe(true)
     await expect(idePanel.getByText('42.5 used / 50 credits · 7.5 remaining at query time')).toHaveCount(0)
+    // An unavailable live account query must not erase or relabel the saved account observation.
+    assert.equal((await page.evaluate(() => window.llmMeter.readQuota('KIRO', crypto.randomUUID()))).body[0].status, 'UNAVAILABLE')
+    assert.equal((await page.evaluate(() => window.llmMeter.readQuotaHistory('KIRO', crypto.randomUUID()))).body.observations.some(entry => entry.id === savedCreditId), true)
+    const creditArchivePath = join(settings, 'quota-history', 'kiro.json')
+    const intactCreditArchive = await readFile(creditArchivePath, 'utf8')
+    assert.equal(intactCreditArchive.includes('SYNTHETIC_IDE_TEST_TOKEN'), false)
+    await writeFile(creditArchivePath, 'PRIVATE_CORRUPT_HISTORY')
+    const brokenArchive = await page.evaluate(() => window.llmMeter.readQuotaHistory('KIRO', crypto.randomUUID()))
+    assert.equal(brokenArchive.body.status, 'ERROR')
+    assert.deepEqual(brokenArchive.body.failures, ['KIRO'])
+    assert.equal((await page.evaluate(() => window.llmMeter.readQuota('CODEX', crypto.randomUUID()))).body[0].status, 'OBSERVED')
+    assert.equal((await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))).body.status, 'READY')
+    assert.equal(await readFile(creditArchivePath, 'utf8'), 'PRIVATE_CORRUPT_HISTORY')
+    await writeFile(creditArchivePath, intactCreditArchive)
+    await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
+    const savedPanel = page.getByRole('region', { name: 'Saved quota history' })
+    await savedPanel.getByText('Saved quota observations', { exact: true }).click()
+    await expect(savedPanel.locator('ol summary').first()).toBeVisible()
+    await savedPanel.locator('ol summary').first().click()
+    await expect(savedPanel).toContainText('7.5 remaining at observation')
+    await expect(savedPanel).toContainText('Account identity is unverified')
+    await page.getByLabel('Agent', { exact: true }).selectOption('')
+
   }
   // Validates the third native source chooser saves Kiro without replacing the other configured agents.
   const beforeKiroSelection = await page.evaluate(() => window.llmMeter.getBackendState())
@@ -324,7 +372,7 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     await application.close(); application = undefined
     await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
   }
-  console.log('Desktop integration passed: three agents, recorded Kiro credits, opt-in Kiro account quota, normalized token subtotals, provider/date/metric filters, background updates, safe failure isolation, per-agent settings, relaunch, and owned Java cleanup.')
+  console.log('Desktop integration passed: three agents, recorded Kiro credits, opt-in Kiro account quota, normalized token subtotals, provider/date/metric filters, background updates, safe failure isolation, durable quota history, per-agent settings, relaunch, and owned Java cleanup.')
 } finally {
   if (application) await application.close()
   if (ideHub && ideHub.exitCode === null && ideHub.signalCode === null) {
