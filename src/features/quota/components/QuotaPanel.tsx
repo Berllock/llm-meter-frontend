@@ -1,4 +1,5 @@
 import { QuotaForecastDetails } from './QuotaForecastDetails'
+import { CreditQuotaDetails } from './CreditQuotaDetails'
 import { useState } from 'react'
 import { useQuota } from '../hooks/useQuota'
 import { windowState } from '../model/quota'
@@ -22,7 +23,8 @@ export function QuotaPanel({ provider, autoRefresh, runtime, now }: { provider?:
     {query.data && !rows.length && <p className="quota-note">No configured source for this agent.</p>}
     {rows.map(row => <div key={row.provider} className="quota-provider"><h3>{row.provider}</h3>
       {row.status !== 'OBSERVED' || !row.snapshot ? <p>{row.status === 'ERROR' ? 'Quota source could not be read safely.' : 'No supported quota observation is available for this source.'}</p> : <>
-        <p>Reported plan: {row.snapshot.planType ?? 'Not identified'} · {row.snapshot?.source === 'ANTIGRAVITY_IDE' ? 'Queried' : 'Observed'} {new Date(row.snapshot.observedAt).toLocaleString()}</p>
+        <p>Reported plan: {row.snapshot.creditQuota?.planName ?? row.snapshot.planType ?? 'Not identified'} · {row.snapshot.source ? 'Queried' : 'Observed'} {new Date(row.snapshot.observedAt).toLocaleString()}</p>
+        {row.snapshot.creditQuota && <CreditQuotaDetails quota={row.snapshot.creditQuota} observedAt={row.snapshot.observedAt} current={!query.isError && runtime.enabled} now={now.getTime()} />}
         {row.provider === 'CODEX' && plan !== 'auto' && plan !== row.snapshot.planType && <p className="quota-mismatch">Selected plan differs from the recorded plan. Values below still belong to the reported account plan; no upgrade capacity is simulated.</p>}
         {row.snapshot?.source === 'ANTIGRAVITY_IDE' && <p className="quota-note">Quota returned by the local Antigravity IDE. Queries are limited to once per minute; provider-side updates may lag. Account plan is not inferred from token counts. Forecasting is not enabled for this source.</p>}
         {!!row.snapshot.excludedWindows && <p className="quota-note">{row.snapshot.excludedWindows} quota buckets omitted because their unit or reset could not be represented. Values shown cover supported percentage buckets only.</p>}

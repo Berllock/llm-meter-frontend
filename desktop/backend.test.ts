@@ -163,3 +163,14 @@ it('isolates IDE quota discovery behind explicit opt-in', async () => {
   expect(manager.state.antigravityIdeSharedAccount).toBe(true)
   expect(launchArguments).toContain('--llm-meter.antigravity.ide-shared-account=true')
 })
+
+// Validates synthetic/default starts never invoke the real authenticated Kiro CLI; explicit opt-in is a fixed boolean flag.
+it('isolates Kiro account queries behind explicit opt-in', async () => {
+  create(); await manager.start({ KIRO: directory })
+  expect(launchArguments).toContain('--llm-meter.kiro.account-quota-enabled=false')
+  expect(manager.state.kiroAccountQuotaEnabled).toBeUndefined()
+  await manager.stop()
+  await manager.start({ KIRO: directory }, false, false, true)
+  expect(launchArguments).toContain('--llm-meter.kiro.account-quota-enabled=true')
+  expect(manager.state.kiroAccountQuotaEnabled).toBe(true)
+})

@@ -24,21 +24,29 @@ export async function readIdeSharedAccount(directory: string): Promise<boolean> 
   try { return JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).antigravityIdeSharedAccount === true }
   catch { return false }
 }
-async function saveSettings(directory: string, sources: AgentSources, enabled: boolean, sharedAccount: boolean) {
+export async function readKiroQuotaEnabled(directory: string): Promise<boolean> {
+  try { return JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).kiroAccountQuotaEnabled === true }
+  catch { return false }
+}
+async function saveSettings(directory: string, sources: AgentSources, enabled: boolean, sharedAccount: boolean, kiroEnabled: boolean) {
   await mkdir(directory, { recursive: true })
   const temporary = join(directory, `settings-${randomUUID()}.tmp`)
   try {
-    await writeFile(temporary, JSON.stringify({ sources, ...(enabled ? { antigravityIdeQuotaEnabled: true } : {}), ...(sharedAccount ? { antigravityIdeSharedAccount: true } : {}) }), { mode: 0o600 })
+    await writeFile(temporary, JSON.stringify({ sources, ...(kiroEnabled ? { kiroAccountQuotaEnabled: true } : {}), ...(enabled ? { antigravityIdeQuotaEnabled: true } : {}), ...(sharedAccount ? { antigravityIdeSharedAccount: true } : {}) }), { mode: 0o600 })
     await rename(temporary, join(directory, 'settings.json'))
   } finally { await rm(temporary, { force: true }) }
 }
 export async function saveSource(directory: string, source: string, provider: DesktopAgent = 'CODEX') {
   if (!isAbsolute(source)) throw new Error('An absolute source path is required')
-  await saveSettings(directory, { ...await readSources(directory), [provider]: source }, await readIdeQuotaEnabled(directory), await readIdeSharedAccount(directory))
+  await saveSettings(directory, { ...await readSources(directory), [provider]: source }, await readIdeQuotaEnabled(directory), await readIdeSharedAccount(directory), await readKiroQuotaEnabled(directory))
 }
 export async function saveIdeQuotaEnabled(directory: string, enabled: boolean) {
-  await saveSettings(directory, await readSources(directory), enabled, await readIdeSharedAccount(directory))
+  await saveSettings(directory, await readSources(directory), enabled, await readIdeSharedAccount(directory), await readKiroQuotaEnabled(directory))
 }
 export async function saveIdeSharedAccount(directory: string, enabled: boolean) {
-  await saveSettings(directory, await readSources(directory), await readIdeQuotaEnabled(directory), enabled)
+  await saveSettings(directory, await readSources(directory), await readIdeQuotaEnabled(directory), enabled, await readKiroQuotaEnabled(directory))
+}
+
+export async function saveKiroQuotaEnabled(directory: string, enabled: boolean) {
+  await saveSettings(directory, await readSources(directory), await readIdeQuotaEnabled(directory), await readIdeSharedAccount(directory), enabled)
 }

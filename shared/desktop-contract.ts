@@ -3,6 +3,7 @@ export type BackendState = {
   message: string
   revision: number
   generation: string
+  kiroAccountQuotaEnabled?: boolean
   antigravityIdeQuotaEnabled?: boolean
   antigravityIdeSharedAccount?: boolean
 }
@@ -16,6 +17,7 @@ export type DesktopBridge = {
   readDailyUsage(period: DesktopPeriod, requestId: string): Promise<DesktopResponse>
   readQuota(provider: DesktopAgent | undefined, requestId: string): Promise<DesktopResponse>
   cancelUsage(requestId: string): void
+  setKiroAccountQuotaEnabled(enabled: boolean): Promise<void>
   setAntigravityIdeQuotaEnabled(enabled: boolean): Promise<void>
   setAntigravityIdeSharedAccount(enabled: boolean): Promise<void>
   restartBackend(): Promise<void>

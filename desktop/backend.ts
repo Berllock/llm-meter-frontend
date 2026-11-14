@@ -2,12 +2,13 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, isAbsolute } from 'node:path'
 import type { AgentSources, BackendState, DesktopPeriod, DesktopResponse } from '../shared/desktop-contract.js'
 
 type Options = {
   jarPath: string
   ideHubPid?: number
+  kiroExecutable?: string
   javaCommand?: string
   bundledJava?: boolean
   startupTimeout?: number
@@ -31,6 +32,7 @@ export class BackendManager {
   private token = ''
   private port?: number
   private epoch = 0
+  private kiroQuotaEnabled = false
   private ideQuotaEnabled = false
   private ideSharedAccount = false
   private starting?: Promise<void>
@@ -41,12 +43,13 @@ export class BackendManager {
   get state(): BackendState { return { ...this.current } }
   subscribe(listener: (state: BackendState) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   private update(phase: BackendState['phase'], message: string, generation = this.current.generation) {
-    this.current = { phase, message, generation, revision: this.current.revision + 1, ...(this.ideQuotaEnabled ? { antigravityIdeQuotaEnabled: true } : {}), ...(this.ideSharedAccount ? { antigravityIdeSharedAccount: true } : {}) }
+    this.current = { phase, message, generation, revision: this.current.revision + 1, ...(this.kiroQuotaEnabled ? { kiroAccountQuotaEnabled: true } : {}), ...(this.ideQuotaEnabled ? { antigravityIdeQuotaEnabled: true } : {}), ...(this.ideSharedAccount ? { antigravityIdeSharedAccount: true } : {}) }
     for (const listener of this.listeners) listener(this.state)
   }
-  start(sources: AgentSources, ideQuotaEnabled = false, ideSharedAccount = false): Promise<void> {
+  start(sources: AgentSources, ideQuotaEnabled = false, ideSharedAccount = false, kiroQuotaEnabled = false): Promise<void> {
     if (this.starting) return this.starting
     if (this.current.phase === 'ready') return Promise.resolve()
+    this.kiroQuotaEnabled = kiroQuotaEnabled
     this.ideQuotaEnabled = ideQuotaEnabled
     this.ideSharedAccount = ideSharedAccount
     const epoch = ++this.epoch
@@ -78,12 +81,15 @@ export class BackendManager {
       }
       env.LLM_METER_DESKTOP_TOKEN = this.token
       if (this.options.ideHubPid !== undefined && (!Number.isSafeInteger(this.options.ideHubPid) || this.options.ideHubPid < 1)) throw new StartupError('Invalid IDE process selection.')
+      if (this.options.kiroExecutable !== undefined && !isAbsolute(this.options.kiroExecutable)) throw new StartupError('Invalid Kiro executable path.')
       const child = (this.options.launch ?? spawn)(this.options.javaCommand ?? 'java', [
         '-jar', this.options.jarPath, '--server.address=127.0.0.1', '--server.port=0',
         '--spring.config.location=classpath:/application.properties', '--spring.profiles.active=desktop',
         '--spring.devtools.restart.enabled=false', '--spring.main.banner-mode=off', '--logging.level.root=ERROR',
         ...(sources.CODEX ? [`--llm-meter.codex.sessions-directory=${sources.CODEX}`] : []),
         ...(sources.ANTIGRAVITY ? [`--llm-meter.antigravity.brain-directory=${sources.ANTIGRAVITY}`] : []),
+        `--llm-meter.kiro.account-quota-enabled=${this.kiroQuotaEnabled}`,
+        ...(this.options.kiroExecutable ? [`--llm-meter.kiro.cli-executable=${this.options.kiroExecutable}`] : []),
         `--llm-meter.antigravity.ide-quota-enabled=${this.ideQuotaEnabled}`,
         `--llm-meter.antigravity.ide-shared-account=${this.ideSharedAccount}`,
         ...(this.ideQuotaEnabled && this.options.ideHubPid ? [`--llm-meter.antigravity.ide-hub-pid=${this.options.ideHubPid}`] : []),
@@ -135,7 +141,7 @@ export class BackendManager {
     try {
       const response = await fetch(`http://127.0.0.1:${this.port}${path}?${params}`, {
         headers: { Accept: 'application/json', 'X-LLM-Meter-Token': this.token },
-        signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(15_000), ...(signal ? [signal] : [])]),
+        signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(path === '/api/quota' ? 35_000 : 15_000), ...(signal ? [signal] : [])]),
         redirect: 'error',
       })
       return { status: response.status, body: response.ok ? await response.json() : null }

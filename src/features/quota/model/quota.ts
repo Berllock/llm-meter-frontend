@@ -3,7 +3,9 @@ export type ForecastStatus = 'INSUFFICIENT_DATA' | 'UNVERIFIED_CONTEXT' | 'STALE
 export type QuotaForecast = Readonly<{ status: ForecastStatus; sampleCount: number; sampleFrom: string | null; sampleTo: string | null;
   percentagePointsPerHour: number | null; projectedExhaustionAt: string | null; earliestExhaustionAt: string | null; latestExhaustionAt: string | null }>
 export type QuotaWindow = Readonly<{ name: string; usedPercent: number; windowMinutes: number | null; resetAt: string; observedAt: string; limitId: string | null; forecast?: QuotaForecast; displayName?: string }>
-export type ProviderQuota = Readonly<{ provider: Agent; status: 'OBSERVED' | 'UNAVAILABLE' | 'ERROR'; snapshot: null | { observedAt: string; collectedAt: string; planType: string | null; windows: QuotaWindow[]; source?: 'ANTIGRAVITY_IDE'; excludedWindows?: number } }>
+export type CreditAllowance = Readonly<{ kind: 'SUBSCRIPTION' | 'BONUS' | 'ADD_ON'; name: string; used: string; limit: string; remaining: string; expiresOn: string | null; daysUntilExpiry: number | null }>
+export type CreditQuota = Readonly<{ planName: string; renewalDate: string | null; overagesEnabled: boolean; allowances: CreditAllowance[] }>
+export type ProviderQuota = Readonly<{ provider: Agent; status: 'OBSERVED' | 'UNAVAILABLE' | 'ERROR'; snapshot: null | { observedAt: string; collectedAt: string; planType: string | null; windows: QuotaWindow[]; source?: 'ANTIGRAVITY_IDE' | 'KIRO_CLI'; excludedWindows?: number; creditQuota?: CreditQuota } }>
 export function windowState(window: QuotaWindow, now: number): 'recent' | 'stale' | 'expired' {
   if (Date.parse(window.resetAt) <= now) return 'expired'
   const age = now - Date.parse(window.observedAt)

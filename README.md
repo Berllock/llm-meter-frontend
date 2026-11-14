@@ -137,8 +137,8 @@ aggregated by day without inventing missing day buckets. Raw error payloads are
 not displayed.
 
 Counters outside JavaScript's safe integer range are rejected rather than rounded.
-Unrepresentable sums remain unavailable. Neither quota, remaining allowance,
-model attribution, nor cost estimates are fabricated. Usage timing reflects local
+Unrepresentable sums remain unavailable. Quota, remaining allowance, model attribution
+and cost estimates are never fabricated from the local session subtotal. Usage timing reflects local
 recorded observations, subject to the backend's coverage and attribution rules.
 
 Each request rediscovers the configured files and reads their bytes to validate
@@ -233,7 +233,7 @@ are captured automatically in the vault.
 
 The dashboard now shows a reconciled Codex token breakdown by recorded turn model, including unidentified increments. Other agents keep their existing measurements, including Kiro credits. Model metadata does not establish subscription token capacity or API billing.
 
-An independent `/api/quota` query displays Codex's latest recorded plan windows: percentage used/remaining, duration, reset and observation time. Expired, stale or failed observations explicitly leave current quota unknown. Unsupported agents show unavailable quota. Polling follows the existing automatic-refresh control; manual quota refresh is independent of the calendar.
+An independent `/api/quota` query displays Codex's latest recorded plan windows: percentage used/remaining, duration, reset and observation time. Expired, stale or failed observations explicitly leave current quota unknown. Unconfigured or unsupported quota sources show unavailable quota. Polling follows the existing automatic-refresh control; manual quota refresh is independent of the calendar.
 
 Configure the Codex plan as reported, Plus or Pro. This choice persists locally and flags disagreement with the recorded plan. It does not simulate upgrade capacity. Recent-pace forecasting now uses comparable Codex source observations, with sampled evidence, fastest/slowest interval scenarios and explicit insufficient/stale outcomes. Other-plan capacity comparisons and token pricing remain later work requiring verified comparable evidence.
 
@@ -246,3 +246,14 @@ With the Antigravity VS Code extension running, enable **Read Antigravity IDE qu
 The panel shows supported percentage buckets, reset, model/bucket labels and query time. Unknown duration and omitted unsupported units remain explicit. Queries are limited to one attempt per minute; provider-side updates may lag. No plan label, token allowance, cost or Antigravity forecast is inferred. For multiple IDE windows using one account, enable **IDE windows share one account**. Otherwise keep one hub active or use an explicit development process selector. The policy chooses one connection and never adds percentages together.
 
 This Linux integration is verified against the Google Antigravity VS Code extension 1.11.0 local hub protocol; future updates may require adaptation. See backend `docs/antigravity-integration.md` for bounds, configuration, architecture and test isolation.
+
+
+## Kiro account credit quota
+
+Enable **Read Kiro account credits** in the desktop toolbar. This opt-in is saved separately from the session folders and restarts the local Java service. An installed Kiro CLI must already be signed in; LLM Meter does not initiate login. The verified Linux default is `~/.local/bin/kiro-cli`. For a different installation in desktop development, set `LLM_METER_KIRO_CLI_EXECUTABLE` to an absolute path before starting the app; packaged mode ignores this override.
+
+The plan-limit panel shows reported plan-credit usage, allowance, remaining credits and billing renewal date. Bonus and add-on pools stay separate, with reported expiry information. These are account observations; the calendar-filtered Kiro card remains the local session-credit subtotal. Credits are never converted into tokens or an API bill. The signed-in account is not automatically matched to historical session files.
+
+Queries are limited to one attempt per minute. The dashboard preserves the query timestamp and marks stale, failed or expired observations as unknown rather than assuming an automatic refill. The progress bar and proximity warning use reported credit limits. The CLI supplies a renewal date, not an exact reset time. No Kiro forecast or upgrade simulation is included.
+
+This integration uses the installed Kiro CLI 3.1.0 ACP account extension and can require adaptation after a CLI update. Browser development enables the backend through `llm-meter.kiro.account-quota-enabled=true` and an optional absolute `llm-meter.kiro.cli-executable`. See backend `docs/kiro-account-quota.md` for the protocol, precision limits, configuration and test isolation.

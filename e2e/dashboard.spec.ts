@@ -328,3 +328,27 @@ test('shows Antigravity IDE quota as queried evidence', async ({ page }) => {
   await expect(quota).toContainText('current quota is unknown')
   await expect(quota.getByText('Reported usage is close to this limit.')).toHaveCount(0)
 })
+
+// Validates Kiro-only view renders account balance and renewal separately from observed session credits.
+test('shows reported Kiro account quota without token or API cost conversion', async ({ page }) => {
+  await page.route('**/api/usage/daily/collection?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    return route.fulfill({ json: { from: params.get('from'), to: params.get('to'), zone: params.get('zone'), status: 'COMPLETE',
+      usage: [{ provider: 'KIRO', date: params.get('to'), zone: params.get('zone'), inputTokens: null, outputTokens: null, cachedTokens: null, credits: '1.25' }],
+      coverage: [{ provider: 'KIRO', observedSessions: 1, pendingSessions: 0, tokenCountsAvailable: false }] } })
+  })
+  await page.route('**/api/quota?*', route => route.fulfill({ json: [{ provider: 'KIRO', status: 'OBSERVED', snapshot: {
+    observedAt: new Date().toISOString(), collectedAt: new Date().toISOString(), planType: null, source: 'KIRO_CLI', windows: [],
+    creditQuota: { planName: 'Synthetic Free', renewalDate: '2099-12-01', overagesEnabled: false, allowances: [
+      { kind: 'SUBSCRIPTION', name: 'Plan credits', used: '42.5', limit: '50', remaining: '7.5', expiresOn: null, daysUntilExpiry: null },
+    ] },
+  } }] }))
+  await page.goto('/')
+  await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
+  const quotaPanel = page.getByRole('region', { name: 'Plan quota observations' })
+  await expect(quotaPanel).toContainText('42.5 used / 50 credits · 7.5 remaining at query time')
+  await expect(quotaPanel).toContainText('Reported credit usage is close to this limit.')
+  await expect(quotaPanel).toContainText('2099-12-01')
+  await expect(page.getByRole('region', { name: 'Kiro credit observations' })).toContainText('1.25')
+  await expect(page.getByText('Known token subtotal')).toHaveCount(0)
+})

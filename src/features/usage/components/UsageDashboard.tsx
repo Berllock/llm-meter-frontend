@@ -78,6 +78,8 @@ export function UsageDashboard() {
           <button className="button" onClick={() => void desktop.bridge?.chooseSessionsFolder()} disabled={desktop.state.phase === 'starting'}>Choose sessions folder</button>
           <button className="button" onClick={() => void desktop.bridge?.chooseSessionsFolder('ANTIGRAVITY')} disabled={desktop.state.phase === 'starting'}>Choose Antigravity brain folder</button>
           <button className="button" onClick={() => void desktop.bridge?.chooseSessionsFolder('KIRO')} disabled={desktop.state.phase === 'starting'}>Choose Kiro CLI sessions folder</button>
+          <IdeQuotaToggle label="Read Kiro account credits" enabled={!!desktop.state.kiroAccountQuotaEnabled} busy={desktop.state.phase === 'starting'}
+            onChange={async enabled => { await desktop.bridge?.setKiroAccountQuotaEnabled(enabled) }} />
           <IdeQuotaToggle enabled={!!desktop.state.antigravityIdeQuotaEnabled} busy={desktop.state.phase === 'starting'}
             onChange={async enabled => { await desktop.bridge?.setAntigravityIdeQuotaEnabled(enabled) }} />
           {desktop.state.antigravityIdeQuotaEnabled && <IdeQuotaToggle label="IDE windows share one account" enabled={!!desktop.state.antigravityIdeSharedAccount} busy={desktop.state.phase === 'starting'}

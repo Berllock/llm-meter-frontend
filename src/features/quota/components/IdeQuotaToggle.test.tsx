@@ -24,6 +24,6 @@ it('recovers from failed setting changes', async () => {
   render(<IdeQuotaToggle enabled={false} busy={false} onChange={onChange} />)
   await act(async () => fireEvent.click(screen.getByLabelText('Read Antigravity IDE quota')))
   expect(screen.getByLabelText('Read Antigravity IDE quota')).not.toBeChecked()
-  expect(screen.getByRole('alert')).toHaveTextContent('The IDE quota setting could not be changed.')
+  expect(screen.getByRole('alert')).toHaveTextContent('The quota setting could not be changed.')
   expect(screen.getByRole('alert')).not.toHaveTextContent('PRIVATE_IPC_DETAIL')
 })

@@ -1,4 +1,5 @@
 import { parseForecast } from './forecast'
+import { parseCreditQuota } from './credits'
 import { agents } from '../../usage/model/usage'
 import type { Agent } from '../../usage/model/usage'
 import type { ProviderQuota, QuotaWindow } from '../model/quota'
@@ -21,6 +22,13 @@ export function parseQuota(value: unknown, provider?: Agent): ProviderQuota[] {
     }
     if (!row.snapshot || typeof row.snapshot !== 'object') throw invalid()
     const snapshot = row.snapshot as Record<string, unknown>
+    if (row.provider === 'KIRO' && snapshot.source === 'KIRO_CLI') {
+      if (!time(snapshot.observedAt) || !time(snapshot.collectedAt) || snapshot.planType !== null || !Array.isArray(snapshot.windows) || snapshot.windows.length
+        || snapshot.excludedWindows !== undefined && snapshot.excludedWindows !== 0) throw invalid()
+      return { provider: 'KIRO', status: 'OBSERVED', snapshot: { observedAt: snapshot.observedAt, collectedAt: snapshot.collectedAt,
+        planType: null, windows: [], source: 'KIRO_CLI', creditQuota: parseCreditQuota(snapshot.creditQuota) } }
+    }
+    if (snapshot.creditQuota !== undefined) throw invalid()
     if (!time(snapshot.observedAt) || !time(snapshot.collectedAt) || !label(snapshot.planType) || !Array.isArray(snapshot.windows) || !snapshot.windows.length) throw invalid()
     const ide = row.provider === 'ANTIGRAVITY' && snapshot.source === 'ANTIGRAVITY_IDE'
     if (snapshot.source !== undefined && !ide) throw invalid()
@@ -48,7 +56,7 @@ export function parseQuota(value: unknown, provider?: Agent): ProviderQuota[] {
 
 export async function fetchQuota(provider?: Agent, signal?: AbortSignal): Promise<ProviderQuota[]> {
   const id = crypto.randomUUID()
-  const timeout = AbortSignal.timeout(15_000)
+  const timeout = AbortSignal.timeout(35_000)
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
   let cancel = () => {}
   try {

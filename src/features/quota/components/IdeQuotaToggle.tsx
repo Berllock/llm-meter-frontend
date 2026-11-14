@@ -10,6 +10,6 @@ export function IdeQuotaToggle({ enabled, busy, onChange, label = 'Read Antigrav
         setPending(next); setFailed(false)
         try { await onChange(next) } catch { setFailed(true) } finally { setPending(null) }
       }} /><span className="toggle" aria-hidden="true" />{label}</label>
-    {failed && <p role="alert">The IDE quota setting could not be changed. Please try again.</p>}
+    {failed && <p role="alert">The quota setting could not be changed. Please try again.</p>}
   </>
 }

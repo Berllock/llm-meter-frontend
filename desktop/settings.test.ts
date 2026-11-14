@@ -3,7 +3,7 @@ import { expect, it } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readSource, readSources, saveSource, readIdeQuotaEnabled, saveIdeQuotaEnabled, readIdeSharedAccount, saveIdeSharedAccount } from './settings'
+import { readSource, readSources, readKiroQuotaEnabled, saveKiroQuotaEnabled, saveSource, readIdeQuotaEnabled, saveIdeQuotaEnabled, readIdeSharedAccount, saveIdeSharedAccount } from './settings'
 // Validates that only the selected folder is persisted, without usage data or request tokens.
 it('persists a selected absolute source folder', async () => {
   const root = await mkdtemp(join(tmpdir(), 'meter-settings-'))
@@ -78,5 +78,23 @@ it('preserves the explicit shared-account policy', async () => {
     await saveIdeSharedAccount(root, false)
     expect(await readIdeSharedAccount(root)).toBe(false)
     expect(await readIdeQuotaEnabled(root)).toBe(true)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// Validates Kiro opt-in is preserved across every independent source and quota settings update.
+it('persists Kiro account quota opt-in without losing other preferences', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'meter-kiro-settings-'))
+  try {
+    expect(await readKiroQuotaEnabled(root)).toBe(false)
+    await saveKiroQuotaEnabled(root, true)
+    await saveIdeQuotaEnabled(root, true)
+    await saveIdeSharedAccount(root, true)
+    await saveSource(root, root, 'KIRO')
+    expect(await readKiroQuotaEnabled(root)).toBe(true)
+    await saveKiroQuotaEnabled(root, false)
+    expect(await readKiroQuotaEnabled(root)).toBe(false)
+    expect(await readIdeQuotaEnabled(root)).toBe(true)
+    expect(await readIdeSharedAccount(root)).toBe(true)
+    expect(await readSources(root)).toEqual({ KIRO: root })
   } finally { await rm(root, { recursive: true, force: true }) }
 })

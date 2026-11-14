@@ -36,6 +36,20 @@ async function ownedJavaProcesses() {
 }
 try {
   if (!packaged) {
+    // A synthetic ACP executable isolates account-quota checks from all real Kiro authentication and sessions.
+    const fakeKiro = join(root, 'kiro-cli')
+    await writeFile(fakeKiro, `#!/usr/bin/python3
+import json,sys,os,datetime
+assert sys.argv[1:]==['acp','--agent-engine','v3','--auth-method','cli']
+a=json.loads(input());assert a['method']=='initialize'
+print(json.dumps({'jsonrpc':'2.0','id':1,'result':{'protocolVersion':1}}),flush=True)
+b=json.loads(input());assert b['method']=='_kiro/account/getUsage'
+with open(os.path.join(os.path.dirname(__file__),'kiro-calls'),'a') as f:f.write('query\\n')
+renewal=(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=30)).date().isoformat()
+print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planName':'Synthetic Free','billingCycleReset':renewal,'overagesEnabled':False,'usageBreakdowns':[{'resourceType':'CREDIT','hasLimit':True,'used':42.5,'limit':50}],'bonusCredits':[],'addOnCredits':[]}}}),flush=True)
+`)
+    await chmod(fakeKiro, 0o700)
+    environment.LLM_METER_KIRO_CLI_EXECUTABLE = fakeKiro
     // Isolate IDE discovery to a fake same-user agy process; never connect to an existing real IDE hub.
     const executable = join(root, 'agy')
     await copyFile(process.execPath, executable)
@@ -205,6 +219,14 @@ try {
   assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.sampleCount, 3)
   assert.equal(JSON.stringify(forecastResult.body).includes('synthetic-account'), false)
   if (!packaged) {
+    // Validate Kiro opt-in, ACP query, credit balance rendering and throttling through actual Electron/Java.
+    await page.getByLabel('Read Kiro account credits').check()
+    await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.kiroAccountQuotaEnabled === true }, { timeout: 60_000 }).toBe(true)
+    await expect(page.getByRole('region', { name: 'Plan quota observations' })).toContainText('42.5 used / 50 credits · 7.5 remaining at query time', { timeout: 15_000 })
+    const creditQuota = await page.evaluate(() => window.llmMeter.readQuota('KIRO', crypto.randomUUID()))
+    assert.equal(creditQuota.body[0].snapshot.source, 'KIRO_CLI')
+    assert.equal(creditQuota.body[0].snapshot.creditQuota.allowances[0].remaining, '7.5')
+    assert.equal((await readFile(join(root, 'kiro-calls'), 'utf8')).trim().split('\n').length, 1)
     // Exercise the actual opt-in, Java process discovery, fixed RPC, reader, quota IPC and dashboard using only the fake IDE.
     await page.getByLabel('Read Antigravity IDE quota').check()
     await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.antigravityIdeQuotaEnabled === true }, { timeout: 60_000 }).toBe(true)
@@ -236,6 +258,8 @@ try {
     await expect(page.getByLabel('Read Antigravity IDE quota')).toBeChecked()
     idePanel = page.getByRole('region', { name: 'Plan quota observations' })
     await expect(idePanel).toContainText('Synthetic IDE model', { timeout: 15_000 })
+    await expect(page.getByLabel('Read Kiro account credits')).toBeChecked()
+    await expect(idePanel).toContainText('42.5 used / 50 credits · 7.5 remaining at query time')
     await expect(page.getByLabel('IDE windows share one account')).toBeChecked()
     await page.getByLabel('IDE windows share one account').uncheck()
     await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && !next.antigravityIdeSharedAccount }, { timeout: 60_000 }).toBe(true)
@@ -243,6 +267,9 @@ try {
     await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && !next.antigravityIdeQuotaEnabled }, { timeout: 60_000 }).toBe(true)
     await expect(idePanel.getByText('Synthetic IDE model')).toHaveCount(0)
     assert.equal(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')).antigravityIdeQuotaEnabled, undefined)
+    await page.getByLabel('Read Kiro account credits').uncheck()
+    await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && !next.kiroAccountQuotaEnabled }, { timeout: 60_000 }).toBe(true)
+    await expect(idePanel.getByText('42.5 used / 50 credits · 7.5 remaining at query time')).toHaveCount(0)
   }
   // Validates the third native source chooser saves Kiro without replacing the other configured agents.
   const beforeKiroSelection = await page.evaluate(() => window.llmMeter.getBackendState())
@@ -283,7 +310,7 @@ try {
     await application.close(); application = undefined
     await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
   }
-  console.log('Desktop integration passed: three agents, recorded Kiro credits, normalized token subtotals, provider/date/metric filters, background updates, safe failure isolation, per-agent settings, relaunch, and owned Java cleanup.')
+  console.log('Desktop integration passed: three agents, recorded Kiro credits, opt-in Kiro account quota, normalized token subtotals, provider/date/metric filters, background updates, safe failure isolation, per-agent settings, relaunch, and owned Java cleanup.')
 } finally {
   if (application) await application.close()
   if (ideHub && ideHub.exitCode === null && ideHub.signalCode === null) {
