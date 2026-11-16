@@ -242,6 +242,7 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
   assert.equal(forecastResult.status, 200)
   assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.status, 'ESTIMATED')
   assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.sampleCount, 3)
+  assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.source, 'NATIVE_LOGS')
   assert.equal(JSON.stringify(forecastResult.body).includes('synthetic-account'), false)
   // Native-format account metadata reaches comparison context, never raw HTTP fields or private identity in the archive.
   const identifiedHistory = await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))
@@ -253,6 +254,20 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
   assert.equal(JSON.stringify(identifiedHistory.body).includes('synthetic-account'), false)
   assert.equal(JSON.stringify(identifiedHistory.body).includes('accountFingerprint'), false)
   assert.equal((await readFile(join(settings, 'quota-history', 'codex.json'), 'utf8')).includes('synthetic-account'), false)
+
+  // Validates independently captured source observations restore a forecast after native history is reduced to one event.
+  for (const row of forecastRows.slice(1)) {
+    await writeFile(join(sessions, 'forecast.jsonl'), [forecastRows[0], row].map(value => JSON.stringify(value)).join('\n') + '\n')
+    await page.evaluate(() => window.llmMeter.readQuota('CODEX', crypto.randomUUID()))
+  }
+  const archivedForecast = await page.evaluate(() => window.llmMeter.readQuota('CODEX', crypto.randomUUID()))
+  assert.equal(archivedForecast.body[0].snapshot.windows[0].forecast.source, 'SAVED_HISTORY')
+  assert.equal(archivedForecast.body[0].snapshot.windows[0].forecast.status, 'ESTIMATED')
+  assert.equal(archivedForecast.body[0].snapshot.windows[0].forecast.sampleCount, 3)
+  await page.getByRole('button', { name: 'Refresh quota' }).click()
+  await expect(forecastPanel).toContainText('Forecast evidence: saved quota observations', { timeout: 15_000 })
+  const reducedArchive = await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))
+  assert.equal(reducedArchive.body.observations.every(entry => entry.snapshot.windows.every(window => window.forecast === undefined)), true)
 
   if (!packaged) {
     // Validate Kiro opt-in, ACP query, credit balance rendering and throttling through actual Electron/Java.
@@ -303,10 +318,21 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     await expect(page.getByLabel('Read Antigravity IDE quota')).toBeChecked()
     await expect(idePanel).toContainText('Synthetic IDE model', { timeout: 15_000 })
     // Capture a native-format synthetic account observation and restore it through a new Java process.
+    const restartedForecast = await page.evaluate(() => window.llmMeter.readQuota('CODEX', crypto.randomUUID()))
+    assert.equal(restartedForecast.body[0].snapshot.windows[0].forecast.source, 'SAVED_HISTORY')
+    assert.equal(restartedForecast.body[0].snapshot.windows[0].forecast.status, 'ESTIMATED')
     const beforeRestartHistory = await page.evaluate(() => window.llmMeter.readQuotaHistory('KIRO', crypto.randomUUID()))
     assert.equal(beforeRestartHistory.body.status, 'READY')
     const savedCreditId = beforeRestartHistory.body.observations[0].id
     assert.equal(beforeRestartHistory.body.observations[0].snapshot.creditQuota.allowances[0].remaining, '7.5')
+    // Keep a fresh one-event native source and verify its saved forecast survives complete application relaunch.
+    const relaunchRow = structuredClone(forecastRows.at(-1))
+    relaunchRow.timestamp = new Date().toISOString()
+    relaunchRow.payload.rate_limits.primary.used_percent = 50
+    await writeFile(join(sessions, 'forecast.jsonl'), [forecastRows[0], relaunchRow].map(value => JSON.stringify(value)).join('\n') + '\n')
+    const beforeRelaunchForecast = await page.evaluate(() => window.llmMeter.readQuota('CODEX', crypto.randomUUID()))
+    assert.equal(beforeRelaunchForecast.body[0].snapshot.windows[0].forecast.source, 'SAVED_HISTORY')
+    assert.equal(beforeRelaunchForecast.body[0].snapshot.windows[0].forecast.sampleCount, 4)
     // Validate the opt-in survives full relaunch and the external synthetic IDE remains independently owned.
     await application.close(); application = undefined
     await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
@@ -317,6 +343,10 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     idePanel = page.getByRole('region', { name: 'Plan quota observations' })
     await expect(idePanel).toContainText('Synthetic IDE model', { timeout: 15_000 })
     await expect(page.getByLabel('Read Kiro account credits')).toBeChecked()
+    const restoredForecast = await page.evaluate(() => window.llmMeter.readQuota('CODEX', crypto.randomUUID()))
+    assert.equal(restoredForecast.body[0].snapshot.windows[0].forecast.source, 'SAVED_HISTORY')
+    assert.equal(restoredForecast.body[0].snapshot.windows[0].forecast.status, 'ESTIMATED')
+    assert.equal(restoredForecast.body[0].snapshot.windows[0].forecast.sampleCount, 4)
     const restoredAccountContext = await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))
     assert.equal(restoredAccountContext.body.observations.some(entry => entry.id === identifiedEntry.id && entry.comparability.groups[0].key === identifiedEntry.comparability.groups[0].key), true)
     const restoredCreditHistory = await page.evaluate(() => window.llmMeter.readQuotaHistory('KIRO', crypto.randomUUID()))

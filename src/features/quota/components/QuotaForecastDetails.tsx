@@ -15,10 +15,14 @@ export function QuotaForecastDetails({ window, recent, now }: { window: QuotaWin
   const forecast = window.forecast
   if (!recent) return <p className="quota-note">Forecast unavailable: current quota is unverified.</p>
   if (!forecast) return <p className="quota-note">No forecast evidence is available in this response.</p>
-  if (forecast.status !== 'ESTIMATED' && forecast.status !== 'RESET_FIRST') return <p className="quota-note">Forecast: {unavailable[forecast.status]}</p>
+  const source = forecast.source === 'SAVED_HISTORY'
+    ? 'Forecast evidence: saved quota observations matched to the recorded account, plan and reset window.'
+    : forecast.source === 'NATIVE_LOGS' ? 'Forecast evidence: native session logs.' : null
+  if (forecast.status !== 'ESTIMATED' && forecast.status !== 'RESET_FIRST') return <div className="quota-note"><p>Forecast: {unavailable[forecast.status]}</p>{source && <p>{source}</p>}</div>
   if (forecast.projectedExhaustionAt && Date.parse(forecast.projectedExhaustionAt) <= now) return <p className="quota-note">The projection time has passed. A newer observation is needed; exhaustion is not confirmed.</p>
   return <div className="quota-forecast" aria-label={`${window.name} quota forecast`}>
     <strong>Recent-pace scenario</strong>
+    {source && <p className="quota-note">{source}</p>}
     <p>{forecast.status === 'RESET_FIRST' ? 'At the recorded average pace, reset arrives before exhaustion.' : `Projected exhaustion: ${time(forecast.projectedExhaustionAt!)}`}</p>
     <p>{forecast.percentagePointsPerHour!.toLocaleString(undefined, { maximumFractionDigits: 2 })} percentage points/hour · {forecast.sampleCount} distinct observations · Sampled {time(forecast.sampleFrom!)} to {time(forecast.sampleTo!)}</p>
     {forecast.earliestExhaustionAt && <p>Fastest observed interval scenario: {time(forecast.earliestExhaustionAt)}.</p>}

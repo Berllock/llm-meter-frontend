@@ -5,6 +5,13 @@ const window = { name: 'primary', usedPercent: 40, windowMinutes: 300, resetAt: 
 const forecast = { status: 'ESTIMATED', sampleCount: 3, sampleFrom: '2026-11-09T12:00:00Z', sampleTo: observedAt, percentagePointsPerHour: 300,
   projectedExhaustionAt: '2026-11-09T12:16:00Z', earliestExhaustionAt: '2026-11-09T12:12:00Z', latestExhaustionAt: null }
 const payload = (f: unknown) => [{ provider: 'CODEX', status: 'OBSERVED', snapshot: { observedAt, collectedAt: observedAt, planType: 'plus', windows: [{ ...window, forecast: f }] } }]
+// Validates explicit origins survive parsing and unknown or malformed origins cannot silently become trusted evidence.
+it('validates native and saved forecast origins', () => {
+  for (const source of ['NATIVE_LOGS', 'SAVED_HISTORY']) {
+    expect(parseQuota(payload({ ...forecast, source }))[0].snapshot!.windows[0].forecast?.source).toBe(source)
+  }
+  for (const source of ['API', '', null, 1]) expect(() => parseQuota(payload({ ...forecast, source }))).toThrow()
+})
 // Validates forecasts preserve percentage-point rates, sparse uncertainty bounds and old-server compatibility.
 it('preserves a validated forecast and accepts absent forecast evidence', () => {
   expect(parseQuota(payload(forecast))[0].snapshot!.windows[0].forecast).toEqual(forecast)

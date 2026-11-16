@@ -285,7 +285,7 @@ test('shows recent-pace forecasts and invalidates stale projections', async ({ p
   const end = Math.floor(Date.now() / 1000) * 1000
   const observedAt = new Date(end).toISOString()
   const projectedExhaustionAt = new Date(end + 720_000).toISOString()
-  const forecast = { status: 'ESTIMATED', sampleCount: 3, sampleFrom: new Date(end - 240_000).toISOString(), sampleTo: observedAt,
+  const forecast = { status: 'ESTIMATED', source: 'SAVED_HISTORY', sampleCount: 3, sampleFrom: new Date(end - 240_000).toISOString(), sampleTo: observedAt,
     percentagePointsPerHour: 300, projectedExhaustionAt, earliestExhaustionAt: projectedExhaustionAt, latestExhaustionAt: projectedExhaustionAt }
   const response = [{ provider: 'CODEX', status: 'OBSERVED', snapshot: { observedAt, collectedAt: observedAt, planType: 'plus', windows: [
     { name: 'primary', usedPercent: 40, windowMinutes: 300, resetAt: new Date(end + 3600_000).toISOString(), observedAt, limitId: 'codex', forecast },
@@ -295,6 +295,11 @@ test('shows recent-pace forecasts and invalidates stale projections', async ({ p
   const quota = page.getByRole('region', { name: 'Plan quota observations' })
   await expect(quota).toContainText('Projected exhaustion:')
   await expect(quota).toContainText('300 percentage points/hour')
+  await expect(quota).toContainText('Forecast evidence: saved quota observations matched to the recorded account, plan and reset window.')
+  forecast.source = 'NATIVE_LOGS'
+  await page.getByRole('button', { name: 'Refresh quota' }).click()
+  await expect(quota).toContainText('Forecast evidence: native session logs.')
+  await expect(quota).not.toContainText('Forecast evidence: saved quota observations')
   await page.getByLabel('Configured Codex plan').selectOption('pro')
   await expect(quota).toContainText('Selected plan differs from the recorded plan')
   await expect(quota).toContainText('Reported plan: plus')

@@ -1,6 +1,7 @@
 import type { Agent } from '../../usage/model/usage'
 export type ForecastStatus = 'INSUFFICIENT_DATA' | 'UNVERIFIED_CONTEXT' | 'STALE' | 'RESET_PASSED' | 'EXHAUSTED' | 'DISCONTINUOUS' | 'NO_GROWTH' | 'RESET_FIRST' | 'ESTIMATED'
-export type QuotaForecast = Readonly<{ status: ForecastStatus; sampleCount: number; sampleFrom: string | null; sampleTo: string | null;
+export type ForecastSource = 'NATIVE_LOGS' | 'SAVED_HISTORY'
+export type QuotaForecast = Readonly<{ status: ForecastStatus; source?: ForecastSource; sampleCount: number; sampleFrom: string | null; sampleTo: string | null;
   percentagePointsPerHour: number | null; projectedExhaustionAt: string | null; earliestExhaustionAt: string | null; latestExhaustionAt: string | null }>
 export type QuotaWindow = Readonly<{ name: string; usedPercent: number; windowMinutes: number | null; resetAt: string; observedAt: string; limitId: string | null; forecast?: QuotaForecast; displayName?: string }>
 export type CreditAllowance = Readonly<{ kind: 'SUBSCRIPTION' | 'BONUS' | 'ADD_ON'; name: string; used: string; limit: string; remaining: string; expiresOn: string | null; daysUntilExpiry: number | null }>

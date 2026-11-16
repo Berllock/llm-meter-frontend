@@ -6,6 +6,22 @@ const window: QuotaWindow = { name: 'primary', usedPercent: 40, windowMinutes: 3
   forecast: { status: 'ESTIMATED', sampleCount: 3, sampleFrom: '2026-11-09T12:00:00Z', sampleTo: '2026-11-09T12:04:00Z', percentagePointsPerHour: 300,
     projectedExhaustionAt: '2026-11-09T12:16:00Z', earliestExhaustionAt: '2026-11-09T12:12:00Z', latestExhaustionAt: null } }
 const now = Date.parse(window.observedAt)
+// Validates saved history is identified as recorded comparable evidence and native logs keep their own origin label.
+it('explains forecast provenance without claiming current account authentication', () => {
+  const view = render(<QuotaForecastDetails window={{ ...window, forecast: { ...window.forecast!, source: 'SAVED_HISTORY' } }} recent now={now} />)
+  expect(screen.getByText('Forecast evidence: saved quota observations matched to the recorded account, plan and reset window.')).toBeVisible()
+  view.rerender(<QuotaForecastDetails window={{ ...window, forecast: { ...window.forecast!, source: 'NATIVE_LOGS' } }} recent now={now} />)
+  expect(screen.getByText('Forecast evidence: native session logs.')).toBeVisible()
+  expect(screen.queryByText(/Forecast evidence: saved/)).toBeNull()
+})
+// Validates insufficient archived history explains both the missing independent samples and their origin.
+it('explains insufficient saved forecast evidence', () => {
+  const sparse = { ...window, forecast: { ...window.forecast!, source: 'SAVED_HISTORY' as const, status: 'INSUFFICIENT_DATA' as const,
+    sampleCount: 2, percentagePointsPerHour: null, projectedExhaustionAt: null, earliestExhaustionAt: null } }
+  render(<QuotaForecastDetails window={sparse} recent now={now} />)
+  expect(screen.getByText(/At least 3 distinct observations/)).toBeVisible()
+  expect(screen.getByText(/Forecast evidence: saved quota observations/)).toBeVisible()
+})
 // Validates recent forecasts explain the scenario, sampled evidence, correct unit and lack of statistical confidence.
 it('renders the evidence and observed pace variation', () => {
   render(<QuotaForecastDetails window={window} recent now={now} />)
