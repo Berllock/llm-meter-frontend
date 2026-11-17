@@ -1,4 +1,4 @@
-import type { Agent } from '../../usage/model/usage'
+import type { Agent } from '../../usage/model/usage.js'
 export type ForecastStatus = 'INSUFFICIENT_DATA' | 'UNVERIFIED_CONTEXT' | 'STALE' | 'RESET_PASSED' | 'EXHAUSTED' | 'DISCONTINUOUS' | 'NO_GROWTH' | 'RESET_FIRST' | 'ESTIMATED'
 export type ForecastSource = 'NATIVE_LOGS' | 'SAVED_HISTORY'
 export type QuotaForecast = Readonly<{ status: ForecastStatus; source?: ForecastSource; sampleCount: number; sampleFrom: string | null; sampleTo: string | null;

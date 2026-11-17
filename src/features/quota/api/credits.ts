@@ -1,5 +1,5 @@
-import { validCredits } from '../../usage/model/usage'
-import type { CreditAllowance, CreditQuota } from '../model/quota'
+import { validCredits } from '../../usage/model/usage.js'
+import type { CreditAllowance, CreditQuota } from '../model/quota.js'
 
 export function parseCreditQuota(value: unknown): CreditQuota {
   const invalid = () => new Error('Account credits could not be displayed reliably.')

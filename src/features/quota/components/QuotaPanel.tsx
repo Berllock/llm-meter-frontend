@@ -1,5 +1,6 @@
 import { QuotaForecastDetails } from './QuotaForecastDetails'
 import { CreditQuotaDetails } from './CreditQuotaDetails'
+import { QuotaAlerts } from './QuotaAlerts'
 import { useState } from 'react'
 import { useQuota } from '../hooks/useQuota'
 import { windowState } from '../model/quota'
@@ -21,6 +22,7 @@ export function QuotaPanel({ provider, autoRefresh, runtime, now }: { provider?:
     {query.isError && <p className="quota-note">Quota refresh failed.{query.data ? ' Last successful quota collection; current quota is unknown.' : ' No quota result is available.'}</p>}
     {!query.data && query.isPending && <p className="quota-note">{runtime.enabled ? 'Loading quota observations…' : 'Waiting for the local service.'}</p>}
     {query.data && !rows.length && <p className="quota-note">No configured source for this agent.</p>}
+    <QuotaAlerts rows={rows} current={runtime.enabled && !query.isError} now={now.getTime()} />
     {rows.map(row => <div key={row.provider} className="quota-provider"><h3>{row.provider}</h3>
       {row.status !== 'OBSERVED' || !row.snapshot ? <p>{row.status === 'ERROR' ? 'Quota source could not be read safely.' : 'No supported quota observation is available for this source.'}</p> : <>
         <p>Reported plan: {row.snapshot.creditQuota?.planName ?? row.snapshot.planType ?? 'Not identified'} · {row.snapshot.source ? 'Queried' : 'Observed'} {new Date(row.snapshot.observedAt).toLocaleString()}</p>

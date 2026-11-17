@@ -22,7 +22,16 @@ await mkdir(settings)
 await writeFile(join(settings, 'settings.json'), JSON.stringify({ sources: { CODEX: sessions, ANTIGRAVITY: brain, KIRO: kiro } }))
 const environment = { ...process.env, LLM_METER_USER_DATA_DIR: settings, LLM_METER_SESSIONS_DIRECTORY: sessions, LLM_METER_ANTIGRAVITY_BRAIN_DIRECTORY: brain, LLM_METER_KIRO_SESSIONS_DIRECTORY: kiro, LLM_METER_DESKTOP_HIDE_WINDOW: '1' }
 if (packaged) Object.assign(environment, { PATH: '/nonexistent-build-tools', JAVA_HOME: '/nonexistent-jdk', LLM_METER_JAVA: '/nonexistent-java', JAVA_TOOL_OPTIONS: '--invalid-host-java-option', _JAVA_OPTIONS: '--invalid-host-java-option', JDK_JAVA_OPTIONS: '--invalid-host-java-option' })
-const launch = () => electron.launch({ ...(packaged ? { executablePath, args: [] } : { args: [project] }), env: environment, timeout: 30_000 })
+const launch = async () => {
+  const instance = await electron.launch({ ...(packaged ? { executablePath, args: [] } : { args: [project] }), env: environment, timeout: 30_000 })
+  // Stub only OS display: application notification decisions, persistence and trusted IPC remain real.
+  await instance.evaluate(({ Notification }) => {
+    globalThis.syntheticQuotaNotices = []
+    Notification.isSupported = () => true
+    Notification.prototype.show = function () { globalThis.syntheticQuotaNotices.push({ title: this.title, body: this.body }) }
+  })
+  return instance
+}
 let application
 let ideHub
 async function ownedJavaProcesses() {
@@ -78,10 +87,18 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
   application = await launch()
   assert.equal(await application.evaluate(({ app }) => app.isPackaged), packaged)
   let page = await application.firstWindow()
+  await page.reload()
   await expect.poll(async () => (await page.evaluate(() => window.llmMeter.getBackendState())).phase, { timeout: 60_000 }).toBe('ready')
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined')
   assert.equal(await page.evaluate(() => typeof window.process), 'undefined')
   const state = await page.evaluate(() => window.llmMeter.getBackendState())
+  // Validates consent is off by default, boolean-only, persisted, and independent of Java's lifecycle.
+  assert.equal((await page.evaluate(() => window.llmMeter.getQuotaNotifications())).enabled, false)
+  assert.equal(await page.evaluate(async () => { try { await window.llmMeter.setQuotaNotifications('invalid'); return false } catch { return true } }), true)
+  await page.getByLabel('Quota desktop notifications').check()
+  await expect.poll(async () => (await page.evaluate(() => window.llmMeter.getQuotaNotifications())).enabled).toBe(true)
+  assert.equal((await page.evaluate(() => window.llmMeter.getBackendState())).generation, state.generation)
+  assert.equal(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')).quotaNotificationsEnabled, true)
   const originalChildren = await ownedJavaProcesses()
   if (process.platform === 'linux') {
     assert.equal(originalChildren.length, 1)
@@ -102,6 +119,7 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
   assert.equal(quota.body[0].snapshot.planType, 'plus')
   assert.equal(quota.body[0].snapshot.limit, null)
   assert.equal(quota.body[0].snapshot.windows[0].usedPercent, 85)
+  assert.equal(await application.evaluate(() => globalThis.syntheticQuotaNotices.length), 0)
   // Validate durable quota storage and repeated-log deduplication through the authenticated archive IPC.
   const savedQuota = await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))
   assert.equal(savedQuota.status, 200)
@@ -243,6 +261,7 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
   assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.status, 'ESTIMATED')
   assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.sampleCount, 3)
   assert.equal(forecastResult.body[0].snapshot.windows[0].forecast.source, 'NATIVE_LOGS')
+  await expect.poll(async () => application.evaluate(() => globalThis.syntheticQuotaNotices.filter(item => item.title === 'LLM Meter · CODEX').length), { timeout: 15_000 }).toBe(1)
   assert.equal(JSON.stringify(forecastResult.body).includes('synthetic-account'), false)
   // Native-format account metadata reaches comparison context, never raw HTTP fields or private identity in the archive.
   const identifiedHistory = await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))
@@ -264,6 +283,7 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
   assert.equal(archivedForecast.body[0].snapshot.windows[0].forecast.source, 'SAVED_HISTORY')
   assert.equal(archivedForecast.body[0].snapshot.windows[0].forecast.status, 'ESTIMATED')
   assert.equal(archivedForecast.body[0].snapshot.windows[0].forecast.sampleCount, 3)
+  assert.equal(await application.evaluate(() => globalThis.syntheticQuotaNotices.filter(item => item.title === 'LLM Meter · CODEX').length), 1)
   await page.getByRole('button', { name: 'Refresh quota' }).click()
   await expect(forecastPanel).toContainText('Forecast evidence: saved quota observations', { timeout: 15_000 })
   const reducedArchive = await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))
@@ -347,6 +367,12 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     assert.equal(restoredForecast.body[0].snapshot.windows[0].forecast.source, 'SAVED_HISTORY')
     assert.equal(restoredForecast.body[0].snapshot.windows[0].forecast.status, 'ESTIMATED')
     assert.equal(restoredForecast.body[0].snapshot.windows[0].forecast.sampleCount, 4)
+    assert.equal((await page.evaluate(() => window.llmMeter.getQuotaNotifications())).enabled, true)
+    assert.equal(await application.evaluate(() => globalThis.syntheticQuotaNotices.filter(item => item.title === 'LLM Meter · CODEX').length), 0)
+    const receiptText = await readFile(join(settings, 'quota-notifications.json'), 'utf8')
+    assert.equal(receiptText.includes('synthetic-account'), false)
+    assert.equal(receiptText.includes('SYNTHETIC_IDE_TEST_TOKEN'), false)
+    assert.equal(receiptText.includes(sessions), false)
     const restoredAccountContext = await page.evaluate(() => window.llmMeter.readQuotaHistory('CODEX', crypto.randomUUID()))
     assert.equal(restoredAccountContext.body.observations.some(entry => entry.id === identifiedEntry.id && entry.comparability.groups[0].key === identifiedEntry.comparability.groups[0].key), true)
     const restoredCreditHistory = await page.evaluate(() => window.llmMeter.readQuotaHistory('KIRO', crypto.randomUUID()))
@@ -399,7 +425,7 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
   }, brain)
   await page.getByRole('button', { name: 'Choose Antigravity brain folder' }).click()
   await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.generation !== beforeAntigravitySelection.generation }, { timeout: 60_000 }).toBe(true)
-  assert.deepEqual(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')), { sources: { CODEX: sessions, ANTIGRAVITY: brain, KIRO: kiro } })
+  assert.deepEqual(JSON.parse(await readFile(join(settings, 'settings.json'), 'utf8')), { sources: { CODEX: sessions, ANTIGRAVITY: brain, KIRO: kiro }, quotaNotificationsEnabled: true })
   const empty = join(root, 'empty-sessions')
   await mkdir(empty)
   const beforeSelection = await page.evaluate(() => window.llmMeter.getBackendState())
@@ -411,7 +437,7 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
   await expect.poll(async () => { const next = await page.evaluate(() => window.llmMeter.getBackendState()); return next.phase === 'ready' && next.generation !== beforeSelection.generation }, { timeout: 60_000 }).toBe(true)
   await expect(page.getByText('No recorded usage in this period')).toBeVisible()
   await expect(page.locator('#records table')).toHaveCount(0)
-  assert.deepEqual(JSON.parse(await readFile(join(root, 'settings/settings.json'), 'utf8')), { sources: { CODEX: empty, ANTIGRAVITY: brain, KIRO: kiro } })
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'settings/settings.json'), 'utf8')), { sources: { CODEX: empty, ANTIGRAVITY: brain, KIRO: kiro }, quotaNotificationsEnabled: true })
   await application.close(); application = undefined
   await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
   {
@@ -423,6 +449,9 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
     const reopened = await application.firstWindow()
     await expect.poll(async () => (await reopened.evaluate(() => window.llmMeter.getBackendState())).phase, { timeout: 60_000 }).toBe('ready')
     await expect(reopened.getByText('No recorded usage in this period')).toBeVisible()
+    await expect(reopened.getByLabel('Quota desktop notifications')).toBeChecked()
+    await reopened.getByLabel('Quota desktop notifications').uncheck()
+    await expect.poll(async () => (await reopened.evaluate(() => window.llmMeter.getQuotaNotifications())).enabled).toBe(false)
     await application.close(); application = undefined
     await expect.poll(ownedJavaProcesses, { timeout: 10_000 }).toEqual([])
   }

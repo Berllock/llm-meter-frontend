@@ -296,6 +296,7 @@ test('shows recent-pace forecasts and invalidates stale projections', async ({ p
   await expect(quota).toContainText('Projected exhaustion:')
   await expect(quota).toContainText('300 percentage points/hour')
   await expect(quota).toContainText('Forecast evidence: saved quota observations matched to the recorded account, plan and reset window.')
+  await expect(page.getByRole('region', { name: 'Quota alerts' })).toContainText('may run out before its reported reset')
   forecast.source = 'NATIVE_LOGS'
   await page.getByRole('button', { name: 'Refresh quota' }).click()
   await expect(quota).toContainText('Forecast evidence: native session logs.')
@@ -307,6 +308,7 @@ test('shows recent-pace forecasts and invalidates stale projections', async ({ p
   await page.getByRole('button', { name: 'Refresh quota' }).click()
   await expect(quota).toContainText('Forecast unavailable: current quota is unverified.')
   await expect(quota.getByText(/Projected exhaustion:/)).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Quota alerts' })).toHaveCount(0)
   await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
   await expect(quota.getByText(/Projected exhaustion:/)).toHaveCount(0)
 })
@@ -540,4 +542,44 @@ test('explains identified and unverified quota comparison contexts', async ({ pa
   await panel.locator('ol summary').first().click()
   await expect(panel).toContainText('Window duration is unreported')
   await expect(panel).not.toContainText('Matched context')
+})
+
+// Validates agent-scoped quota alerts preserve credit units and disappear after failures, expiry or zero allowances.
+test('shows recent agent quota alerts without treating unavailable balances as zero', async ({ page }) => {
+  await intercept(page)
+  const now = Date.now(), observedAt = new Date(now).toISOString()
+  const rows = [
+    { provider: 'CODEX', status: 'OBSERVED', snapshot: { observedAt, collectedAt: observedAt, planType: 'plus', windows: [
+      { name: 'primary', usedPercent: 85, windowMinutes: 300, resetAt: new Date(now + 3600_000).toISOString(), observedAt, limitId: 'codex' },
+    ] } },
+    { provider: 'ANTIGRAVITY', status: 'OBSERVED', snapshot: { observedAt, collectedAt: observedAt, planType: null, source: 'ANTIGRAVITY_IDE', windows: [
+      { name: 'weekly', displayName: 'Synthetic model', usedPercent: 100, windowMinutes: null, resetAt: new Date(now + 7200_000).toISOString(), observedAt, limitId: 'model' },
+    ] } },
+    { provider: 'KIRO', status: 'OBSERVED', snapshot: { observedAt, collectedAt: observedAt, planType: null, source: 'KIRO_CLI', windows: [],
+      creditQuota: { planName: 'Synthetic Free', renewalDate: '2099-12-01', overagesEnabled: false, allowances: [
+        { kind: 'SUBSCRIPTION', name: 'Plan credits', used: '42.5', limit: '50', remaining: '7.5', expiresOn: null, daysUntilExpiry: null },
+      ] } } },
+  ]
+  await page.route('**/api/quota?*', route => {
+    const provider = new URL(route.request().url()).searchParams.get('provider')
+    return route.fulfill({ json: rows.filter(row => !provider || row.provider === provider) })
+  })
+  await page.goto('/')
+  const alerts = page.getByRole('region', { name: 'Quota alerts' })
+  await expect(alerts).toContainText('CODEX')
+  await expect(alerts).toContainText('ANTIGRAVITY')
+  await expect(alerts).toContainText('Reported allowance exhausted.')
+  await expect(alerts).toContainText('KIRO')
+  await expect(page.getByLabel('Quota desktop notifications')).toHaveCount(0)
+  await page.getByLabel('Agent', { exact: true }).selectOption('KIRO')
+  await expect(alerts).toContainText('Reported credit usage is close to this limit.')
+  await expect(alerts).not.toContainText('CODEX')
+  await page.route('**/api/quota?*', route => route.fulfill({ status: 503 }))
+  await page.getByRole('button', { name: 'Refresh quota' }).click()
+  await expect(alerts).toHaveCount(0)
+  await page.route('**/api/quota?*', route => route.fulfill({ json: [{ ...rows[2], snapshot: { ...rows[2].snapshot,
+    creditQuota: { ...rows[2].snapshot.creditQuota, allowances: [{ kind: 'SUBSCRIPTION', name: 'Plan credits', used: '0', limit: '0', remaining: '0', expiresOn: null, daysUntilExpiry: null }] } } }] }))
+  await page.getByRole('button', { name: 'Refresh quota' }).click()
+  await expect(page.getByRole('region', { name: 'Plan quota observations' })).toContainText('0 used / 0 credits')
+  await expect(alerts).toHaveCount(0)
 })

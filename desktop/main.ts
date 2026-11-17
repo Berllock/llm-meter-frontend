@@ -1,10 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron'
 import { mkdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { BackendManager } from './backend.js'
 import { resolveBackendRuntime } from './runtime.js'
+import { QuotaNotifications } from './quota-notifications.js'
+import { readQuotaNotificationsEnabled, saveQuotaNotificationsEnabled } from './settings.js'
 import type { AgentSources, DesktopAgent } from '../shared/desktop-contract.js'
 import { readSources, saveSource, readKiroQuotaEnabled, saveKiroQuotaEnabled, readIdeQuotaEnabled, saveIdeQuotaEnabled, readIdeSharedAccount, saveIdeSharedAccount } from './settings.js'
 
@@ -15,6 +17,9 @@ if (process.env.LLM_METER_USER_DATA_DIR) {
 }
 let window: BrowserWindow | null = null
 let backend: BackendManager
+let notifications: QuotaNotifications
+let quotaSequence = 0
+const visibleNotifications = new Set<Notification>()
 let sources: AgentSources = {}
 let kiroQuotaEnabled = false
 let ideQuotaEnabled = false
@@ -44,6 +49,19 @@ async function chooseSource(provider: DesktopAgent = 'CODEX') {
   await restart()
 }
 function registerBridge() {
+  ipcMain.handle('meter:quota-notifications-state', event => { requireTrusted(event); return notifications.state })
+  ipcMain.handle('meter:quota-notifications', (event, enabled: unknown) => {
+    requireTrusted(event)
+    if (typeof enabled !== 'boolean') throw new Error('Invalid notification setting')
+    const change = operation.then(async () => {
+      if (quitting) throw new Error('Application unavailable')
+      await saveQuotaNotificationsEnabled(app.getPath('userData'), enabled)
+      notifications.setEnabled(enabled)
+      return notifications.state
+    })
+    operation = change.then(() => {}, () => {})
+    return change
+  })
   ipcMain.handle('meter:state', event => { requireTrusted(event); return backend.state })
   ipcMain.handle('meter:restart', event => { requireTrusted(event); return serialize(restart) })
   ipcMain.handle('meter:kiro-account-quota', (event, enabled: unknown) => {
@@ -89,8 +107,21 @@ function registerBridge() {
     requireTrusted(event)
     if (typeof id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(id) || requests.has(id) || requests.size >= 8) return { status: 0, body: null }
     const controller = new AbortController()
+    const generation = backend.state.generation
+    const sequence = ++quotaSequence
+    const contexts = {
+      CODEX: JSON.stringify(['CODEX', sources.CODEX]),
+      ANTIGRAVITY: JSON.stringify(['ANTIGRAVITY', sources.ANTIGRAVITY, ideQuotaEnabled, ideSharedAccount]),
+      KIRO: JSON.stringify(['KIRO', sources.KIRO, kiroQuotaEnabled]),
+    }
     requests.set(id, controller)
-    try { return await backend.readQuota(provider, controller.signal) } finally { requests.delete(id) }
+    try {
+      const response = await backend.readQuota(provider, controller.signal)
+      const current = () => !quitting && !controller.signal.aborted && backend.state.phase === 'ready'
+        && backend.state.generation === generation && sequence === quotaSequence
+      if (response.status === 200 && current()) void notifications.observe(response.body, contexts, current, Date.now(), provider as DesktopAgent | undefined)
+      return response
+    } finally { requests.delete(id) }
   })
   ipcMain.handle('meter:quota-history', async (event, provider: unknown, id: unknown) => {
     requireTrusted(event)
@@ -122,6 +153,18 @@ else {
     backend = new BackendManager({ ...await resolveBackendRuntime({
       packaged: app.isPackaged, appRoot: app.getAppPath(), resourcesPath: process.resourcesPath,
     }), historyDirectory: join(app.getPath('userData'), 'quota-history'), ...(ideHubPid ? { ideHubPid: Number(ideHubPid) } : {}), ...(kiroExecutable ? { kiroExecutable } : {}) })
+    notifications = new QuotaNotifications(app.getPath('userData'), () => Notification.isSupported(), alert => {
+      const body = { NEAR_LIMIT: 'A recent observation reports at least 80% used. Open LLM Meter for details.',
+        EXHAUSTED: 'A recent observation reports an exhausted allowance. Open LLM Meter for details.',
+        EXHAUSTION_FORECAST: 'At the recorded recent pace, an allowance may run out before reset. Open LLM Meter for details.' }[alert.kind]
+      const notification = new Notification({ title: `LLM Meter · ${alert.provider}`, body, silent: true })
+      visibleNotifications.add(notification)
+      notification.once('close', () => { visibleNotifications.delete(notification) })
+      notification.once('failed', () => { visibleNotifications.delete(notification); notifications.deliveryFailed() })
+      notification.on('click', () => { window?.restore(); window?.show(); window?.focus() })
+      notification.show()
+    }, () => { if (window && !window.isDestroyed()) window.webContents.send('meter:quota-notifications-change', notifications.state) })
+    await notifications.initialize(await readQuotaNotificationsEnabled(app.getPath('userData')))
     registerBridge()
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { label: 'File', submenu: [

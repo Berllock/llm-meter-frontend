@@ -10,6 +10,7 @@ import type { Agent, UsagePeriod } from '../model/usage'
 import { UsageChart } from './UsageChart'
 import { UsageFilters } from './UsageFilters'
 import { QuotaPanel } from '../../quota/components/QuotaPanel'
+import { QuotaNotificationToggle } from '../../quota/components/QuotaNotificationToggle'
 import { QuotaHistoryPanel } from '../../quota/components/QuotaHistoryPanel'
 import { IdeQuotaToggle } from '../../quota/components/IdeQuotaToggle'
 import { ModelUsageTable } from './ModelUsageTable'
@@ -26,7 +27,7 @@ export function UsageDashboard() {
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
     const tick = () => setNow(new Date())
-    const timer = window.setInterval(tick, 60_000)
+    const timer = window.setInterval(tick, 5_000)
     window.addEventListener('focus', tick)
     return () => { window.clearInterval(timer); window.removeEventListener('focus', tick) }
   }, [])
@@ -115,6 +116,7 @@ export function UsageDashboard() {
         </section>}
         {(creditOnly || coverage.some(item => item.provider === 'KIRO') || failures.some(item => item.provider === 'KIRO')) && <section className="metric-grid" aria-label="Kiro credit observations" aria-busy={pending}><article className={`metric-card ${creditOnly ? 'featured' : ''}`}><div className="metric-label">Observed Kiro credits</div><div className={`metric-value ${pending ? 'skeleton metric-skeleton' : ''}`} title={creditTotal ?? 'Unavailable'}>{pending ? <span className="sr-only">Loading recorded credits</span> : formatCredits(creditTotal)}</div><p>Recorded credits · separate from tokens and currency</p></article></section>}
         {hasData && !allFailed && !rows.length && <div className="empty-banner"><Database size={20} /><div><strong>{incomplete ? 'No observations available for this period yet' : 'No recorded usage in this period'}</strong><p>{incomplete ? 'Coverage is incomplete. Pending sessions or unavailable sources may contain usage for this period.' : 'Try another date range. An empty result does not establish zero account-wide usage.'}</p></div></div>}
+        {desktop.bridge?.getQuotaNotifications && <QuotaNotificationToggle bridge={desktop.bridge} />}
         <QuotaPanel provider={agent || undefined} autoRefresh={autoRefresh} now={now} runtime={{ enabled: available, generation: desktop.state.generation, refreshInBackground: !!desktop.bridge }} />
         <QuotaHistoryPanel provider={agent || undefined} autoRefresh={autoRefresh} runtime={{ enabled: available, generation: desktop.state.generation, refreshInBackground: !!desktop.bridge }} />
         {!creditOnly && (query.data?.modelUsage?.length ?? 0) > 0 && <ModelUsageTable rows={query.data!.modelUsage!} />}

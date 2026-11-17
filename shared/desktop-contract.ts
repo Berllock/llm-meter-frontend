@@ -11,7 +11,11 @@ export type DesktopAgent = 'CODEX' | 'ANTIGRAVITY' | 'KIRO'
 export type AgentSources = Partial<Record<DesktopAgent, string>>
 export type DesktopPeriod = { from: string; to: string; zone: string; provider?: DesktopAgent }
 export type DesktopResponse = { status: number; body: unknown }
+export type QuotaNotificationState = { enabled: boolean; supported: boolean; error: 'STORAGE' | 'DELIVERY' | null }
 export type DesktopBridge = {
+  getQuotaNotifications(): Promise<QuotaNotificationState>
+  setQuotaNotifications(enabled: boolean): Promise<QuotaNotificationState>
+  onQuotaNotifications(listener: (state: QuotaNotificationState) => void): () => void
   getBackendState(): Promise<BackendState>
   onBackendState(listener: (state: BackendState) => void): () => void
   readDailyUsage(period: DesktopPeriod, requestId: string): Promise<DesktopResponse>

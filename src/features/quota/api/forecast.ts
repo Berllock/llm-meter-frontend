@@ -1,4 +1,4 @@
-import type { QuotaForecast, QuotaWindow, ForecastStatus, ForecastSource } from '../model/quota'
+import type { QuotaForecast, QuotaWindow, ForecastStatus, ForecastSource } from '../model/quota.js'
 
 /** Validate optional forecasts independently from transport and never silently accept contradictory projections. */
 export function parseForecast(value: unknown, window: QuotaWindow): QuotaForecast | undefined {

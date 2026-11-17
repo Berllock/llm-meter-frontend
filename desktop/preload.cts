@@ -1,7 +1,14 @@
 import electron = require('electron')
-import type { BackendState, DesktopBridge, DesktopPeriod } from '../shared/desktop-contract.js'
+import type { BackendState, DesktopBridge, DesktopPeriod, QuotaNotificationState } from '../shared/desktop-contract.js'
 const { contextBridge, ipcRenderer } = electron
 const bridge: DesktopBridge = {
+  getQuotaNotifications: () => ipcRenderer.invoke('meter:quota-notifications-state'),
+  setQuotaNotifications: enabled => ipcRenderer.invoke('meter:quota-notifications', enabled),
+  onQuotaNotifications: listener => {
+    const receive = (_event: unknown, state: QuotaNotificationState) => listener(state)
+    ipcRenderer.on('meter:quota-notifications-change', receive)
+    return () => { ipcRenderer.removeListener('meter:quota-notifications-change', receive) }
+  },
   getBackendState: () => ipcRenderer.invoke('meter:state'),
   onBackendState: listener => {
     const receive = (_event: unknown, state: BackendState) => listener(state)

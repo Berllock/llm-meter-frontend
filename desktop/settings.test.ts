@@ -4,6 +4,26 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readSource, readSources, readKiroQuotaEnabled, saveKiroQuotaEnabled, saveSource, readIdeQuotaEnabled, saveIdeQuotaEnabled, readIdeSharedAccount, saveIdeSharedAccount } from './settings'
+import { readQuotaNotificationsEnabled, saveQuotaNotificationsEnabled } from './settings'
+// Validates notification consent defaults off and survives every independent source/account setting update.
+it('persists notification consent independently', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'meter-notification-settings-'))
+  try {
+    expect(await readQuotaNotificationsEnabled(root)).toBe(false)
+    await saveQuotaNotificationsEnabled(root, true)
+    await saveSource(root, root, 'CODEX')
+    await saveKiroQuotaEnabled(root, true)
+    await saveIdeQuotaEnabled(root, true)
+    await saveIdeSharedAccount(root, true)
+    expect(await readQuotaNotificationsEnabled(root)).toBe(true)
+    await saveQuotaNotificationsEnabled(root, false)
+    expect(await readKiroQuotaEnabled(root)).toBe(true)
+    expect(await readIdeSharedAccount(root)).toBe(true)
+    expect(await readIdeQuotaEnabled(root)).toBe(true)
+    expect(await readQuotaNotificationsEnabled(root)).toBe(false)
+    expect(await readSources(root)).toEqual({ CODEX: root })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
 // Validates that only the selected folder is persisted, without usage data or request tokens.
 it('persists a selected absolute source folder', async () => {
   const root = await mkdtemp(join(tmpdir(), 'meter-settings-'))
