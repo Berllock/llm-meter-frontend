@@ -79,7 +79,11 @@ print(json.dumps({'jsonrpc':'2.0','id':2,'result':{'success':True,'data':{'planN
       })
       server.listen(Number(arg('--hub-port')), '127.0.0.1', () => fs.writeFileSync(path.join(root, 'ide-ready'), 'ready'))
     `)
-    ideHub = spawn(executable, [join(root, 'fake-ide.cjs'), '--hub', '--app_data_dir=antigravity', `--hub-port=${hubPort}`, '--csrf_token=SYNTHETIC_IDE_TEST_TOKEN'], { stdio: 'ignore' })
+    ideHub = spawn(executable, [join(root, 'fake-ide.cjs'), '--hub', '--app_data_dir=antigravity', `--hub-port=${hubPort}`], {
+      stdio: 'ignore', env: { ...process.env, ANTIGRAVITY_SERVER_CSRF_TOKEN: 'SYNTHETIC_IDE_TEST_TOKEN' },
+    })
+    // Current IDE launchers keep connection credentials out of argv; real Java discovery reads the named process variable.
+    if (process.platform === 'linux') assert.equal((await readFile(`/proc/${ideHub.pid}/cmdline`, 'utf8')).includes('SYNTHETIC_IDE_TEST_TOKEN'), false)
     await expect.poll(async () => readFile(join(root, 'ide-ready'), 'utf8').catch(() => ''), { timeout: 10_000 }).toBe('ready')
     environment.LLM_METER_ANTIGRAVITY_IDE_HUB_PID = String(ideHub.pid)
   }
